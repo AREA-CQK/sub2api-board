@@ -1,0 +1,23 @@
+.DS_Store
+DerivedData/
+build/
+*.xcresult
+*.xcuserstate
+xcuserdata/
+
+# Local reference checkout; this repository only publishes the macOS client.
+sub2api-main/
+
+# Local signing and environment overrides.
+*.p12
+*.mobileprovision
+*.provisionprofile
+.env
+.env.*
+!.env.example
+
+# Local release artifacts; upload them through GitHub Releases.
+*.dmg
+*.pkg
+*.zip
+*.tar.gz

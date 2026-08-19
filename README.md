@@ -1,93 +1,147 @@
-# cc-sub2api-board
+<div align="center">
+  <img src="docs/assets/app-icon.png" width="144" height="144" alt="Sub2API Board 图标">
 
-sub2api mac小部件
+  <h1>Sub2API Board</h1>
 
-## Getting started
+  <p><strong>把 Sub2API 账号额度、实时用量和系统总览放到 macOS 桌面。</strong></p>
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+  <p>
+    <a href="../../releases/latest"><img src="https://img.shields.io/badge/Download-Latest_Release-0A84FF?style=for-the-badge&logo=apple&logoColor=white" alt="下载最新版本"></a>
+  </p>
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+  <p>
+    <img src="https://img.shields.io/badge/macOS-14.0%2B-24292F?style=flat-square&logo=apple&logoColor=white" alt="macOS 14.0 或更高版本">
+    <img src="https://img.shields.io/badge/Native-SwiftUI-F05138?style=flat-square&logo=swift&logoColor=white" alt="原生 SwiftUI 应用">
+    <img src="https://img.shields.io/badge/WidgetKit-小・中・大-34C759?style=flat-square" alt="支持小、中、大三种 Widget">
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F5C518?style=flat-square" alt="MIT License"></a>
+  </p>
 
-## Add your files
+  <p>
+    <a href="#widget-优先">Widget</a> ·
+    <a href="#功能">功能</a> ·
+    <a href="#下载与安装">安装</a> ·
+    <a href="#安全与隐私">安全</a>
+  </p>
+</div>
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+> [!IMPORTANT]
+> Sub2API Board 基于 [MIT License](LICENSE) 开源。普通用户可以直接从 [GitHub Releases](../../releases/latest) 下载安装包，开发者也可以自行构建。
 
+## Widget 优先
+
+无需反复打开管理后台，在桌面就能快速查看今日请求、Token、实际费用、账号状态及不同额度窗口。支持 macOS 小、中、大三种 Widget，并按照设置的刷新间隔自动更新。
+
+| 小号 Widget | 中号 Widget |
+| :---: | :---: |
+| <img src="docs/screenshots/widget-small.png" width="300" alt="小号 Widget"> | <img src="docs/screenshots/widget-medium.png" width="640" alt="中号 Widget"> |
+
+<p align="center">
+  <strong>大号 Widget</strong><br><br>
+  <img src="docs/screenshots/widget-large.png" width="720" alt="大号 Widget，展示系统总览与多个账号额度">
+</p>
+
+> 截图使用脱敏演示数据，不包含真实服务地址、账号或费用。
+
+## 功能
+
+| 模块 | 能力 |
+| --- | --- |
+| **数据总览** | 今日请求、Token、实际费用、RPM、TPM、账号健康状态、累计数据和运行时长 |
+| **额度追踪** | 5 小时、7 天、30 天或 API Key 配额利用率及重置时间 |
+| **用量趋势** | 请求、Token、费用切换，支持悬停查看单日数据 |
+| **账号展示** | 最多选择 6 个账号，优先展示未用尽且使用率较高的账号 |
+| **桌面 Widget** | 小号和中号每次展示 1 个账号，大号展示 2 个账号，每 3 秒轮换 |
+| **自动恢复** | Widget 请求失败时回退到最近一次成功快照 |
+| **账号安全** | 管理员邮箱与密码登录，支持 TOTP 两步验证 |
+
+## 下载与安装
+
+### 下载
+
+前往 [GitHub Releases](../../releases/latest)，下载最新版本的 `.dmg` 或 `.zip` 分发包。
+
+### 安装
+
+1. 打开 `.dmg`，将 **Sub2API Board** 拖入“应用程序”文件夹；如果下载的是 `.zip`，解压后将 App 移入“应用程序”。
+2. 在“应用程序”中找到 Sub2API Board。
+3. 首次启动时，右键 App 并选择“打开”，然后在确认窗口中再次点击“打开”。
+4. 如果系统仍然阻止启动，前往“系统设置 → 隐私与安全性”，找到对应提示并点击“仍要打开”。
+
+> [!WARNING]
+> 标注为“未公证测试版”的 Release 会触发 macOS Gatekeeper 提示，需要按照上述步骤手动允许。请只从本仓库的 Releases 页面下载安装包。
+
+升级时下载新版本并覆盖“应用程序”中的旧版本即可。正常覆盖安装不会清除已有账号设置。
+
+## 开始使用
+
+1. 启动宿主 App，填写 Sub2API 服务根地址，例如 `https://sub2api.example.com`。
+2. 使用管理员邮箱、密码及可选的 TOTP 验证码登录。
+3. 在设置中选择 Widget 要展示的账号和刷新间隔，可选 `1、5、10、15、20…60` 分钟。
+4. 在 macOS 桌面进入编辑模式，搜索“Sub2API 看板”，选择尺寸后添加。
+
+> [!NOTE]
+> WidgetKit 的刷新时间由 macOS 统一调度，设置值是期望的最早刷新时间，并不保证精确到分钟。账号每 3 秒轮换也可能被系统节流；宿主 App 顶部的刷新按钮可以立即更新共享快照。
+
+## 从源码构建
+
+### 开发环境
+
+- macOS 14 Sonoma 或更高版本
+- Xcode 15.3 或更高版本
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+
+### 构建步骤
+
+```bash
+xcodegen generate
+open Sub2APIBoard.xcodeproj
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/cqkemail/cc-sub2api-board.git
-git branch -M main
-git push -uf origin main
+
+首次构建前，请在 Xcode 的 **Signing & Capabilities** 中为宿主 App 和 Widget Extension 选择自己的开发团队。两个 Target 必须使用一致的签名配置，并正确配置 App Group 与 Keychain Sharing，才能在 Widget 中共享登录状态和看板快照。
+
+运行测试：
+
+```bash
+xcodebuild test \
+  -project Sub2APIBoard.xcodeproj \
+  -scheme Sub2APIBoard \
+  -destination 'platform=macOS'
 ```
 
-## Integrate with your tools
+## 安全与隐私
 
-* [Set up project integrations](https://gitlab.com/cqkemail/cc-sub2api-board/-/settings/integrations)
+- 远程 Sub2API 服务必须使用 HTTPS；仅 `localhost`、`127.0.0.1` 和 `::1` 可使用 HTTP 调试。
+- 登录密码和 TOTP 验证码不会持久化。
+- Access Token 与 Refresh Token 保存在共享 macOS Keychain，仅供签名一致的 App 与 Widget 使用。
+- 服务地址、账号选择和最近一次看板快照保存在 App Group 容器，供 Widget 后台刷新。
+- App 开启 Sandbox，仅声明出站网络、App Group 与共享 Keychain 权限。
+- 退出登录会删除 Token 和共享看板快照，并刷新 Widget 时间线。
+- App 不包含遥测、广告 SDK 或第三方运行时依赖。
 
-## Collaborate with your team
+## 系统要求
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+- macOS 14 Sonoma 或更高版本
+- 一个可访问的 Sub2API 管理后台
+- 远程服务提供有效的 HTTPS 地址
 
-## Test and Deploy
+## 版本兼容
 
-Use the built-in continuous integration in GitLab.
+Sub2API Board 通过 Sub2API 管理接口读取看板、账号和额度数据。不同 Sub2API 版本的接口可能存在差异；如果登录成功但数据请求失败，请先升级 Sub2API Board，并在反馈时附上 App 版本、Sub2API 版本和脱敏后的错误信息。
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## 反馈问题
 
-***
+请通过本仓库的 Issues 反馈问题。提交日志或截图前，请隐藏服务地址、邮箱、账号名称、Token、API Key 和费用等敏感信息。
 
-# Editing this README
+## 参与贡献
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+欢迎提交 Issue 和 Pull Request。提交代码前请确保项目能够构建，并运行与改动范围相关的测试。安全问题中不要附带真实凭据或完整请求日志。
 
-## Suggestions for a good README
+## 许可证
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+本项目基于 [MIT License](LICENSE) 开源。
 
-## Name
-Choose a self-explaining name for your project.
+---
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+<div align="center">
+  <sub>Copyright © 2026 changqk · Released under the <a href="LICENSE">MIT License</a></sub>
+</div>
