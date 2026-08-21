@@ -13,6 +13,7 @@
 		17EFCD929074CE6F45E144EF /* BoardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9844F98EB264E4DC7DB68163 /* BoardViewModel.swift */; };
 		317AC8803C02B9EF98231336 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DB3FFDC434ADD4F6CA7FA91E /* Assets.xcassets */; };
 		3984698C1042AF0C15F1B100 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF917EFFDFD577B5B7AC744A /* Models.swift */; };
+		408EAAEE2F3994B7186193A9 /* BoardTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EFACA011BD218495BF8986F /* BoardTheme.swift */; };
 		455532F851B8849D3A62C1D8 /* Sub2APIBoardWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C3DAFA1D6451F8D18263A4 /* Sub2APIBoardWidget.swift */; };
 		46B53EFCD26DD4E6B7031127 /* AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F08B0C7A763A56C99CC3D7 /* AppConfiguration.swift */; };
 		4748BCDA753485699E50B919 /* Sub2APIBoardApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E244B274329277AFA273B4A8 /* Sub2APIBoardApp.swift */; };
@@ -24,6 +25,7 @@
 		86B4907F982D364721785FEC /* Sub2APIBoardWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B87A7E48C59A0E7CC989071F /* Sub2APIBoardWidgetBundle.swift */; };
 		8AF7754CC30747B230B1ED2D /* Sub2APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 407E78CA3551713D88D6193B /* Sub2APIClient.swift */; };
 		A743D062D884C5EBAFC38856 /* Sub2APIBoardWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4C0BD014F308C98984AD1F70 /* Sub2APIBoardWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A9832D9225B87681FC30BB58 /* BoardTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EFACA011BD218495BF8986F /* BoardTheme.swift */; };
 		CF67E27D440E71AEA1D7714D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DB3FFDC434ADD4F6CA7FA91E /* Assets.xcassets */; };
 		FA673A4232AB601A3510E74B /* AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F08B0C7A763A56C99CC3D7 /* AppConfiguration.swift */; };
 /* End PBXBuildFile section */
@@ -61,6 +63,7 @@
 
 /* Begin PBXFileReference section */
 		020159ECD86D16CA34DB02C3 /* Sub2APIBoard.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sub2APIBoard.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1EFACA011BD218495BF8986F /* BoardTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardTheme.swift; sourceTree = "<group>"; };
 		365624366D5CF6E20B98703E /* ModelDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDecodingTests.swift; sourceTree = "<group>"; };
 		407E78CA3551713D88D6193B /* Sub2APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sub2APIClient.swift; sourceTree = "<group>"; };
 		4C0BD014F308C98984AD1F70 /* Sub2APIBoardWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = Sub2APIBoardWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -84,6 +87,7 @@
 			children = (
 				A1F08B0C7A763A56C99CC3D7 /* AppConfiguration.swift */,
 				DB3FFDC434ADD4F6CA7FA91E /* Assets.xcassets */,
+				1EFACA011BD218495BF8986F /* BoardTheme.swift */,
 				E13C427CF623128EEF26CD1C /* KeychainStore.swift */,
 				EF917EFFDFD577B5B7AC744A /* Models.swift */,
 				407E78CA3551713D88D6193B /* Sub2APIClient.swift */,
@@ -265,6 +269,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FA673A4232AB601A3510E74B /* AppConfiguration.swift in Sources */,
+				408EAAEE2F3994B7186193A9 /* BoardTheme.swift in Sources */,
 				17EFCD929074CE6F45E144EF /* BoardViewModel.swift in Sources */,
 				0939CFAD1B8039AFA71C48E8 /* ContentView.swift in Sources */,
 				4968F7011AD4DD1225572FF6 /* KeychainStore.swift in Sources */,
@@ -289,6 +294,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				46B53EFCD26DD4E6B7031127 /* AppConfiguration.swift in Sources */,
+				A9832D9225B87681FC30BB58 /* BoardTheme.swift in Sources */,
 				4774C534D38FCF346DA9DB39 /* KeychainStore.swift in Sources */,
 				5B2FA77712E5487F9A27FC00 /* Models.swift in Sources */,
 				455532F851B8849D3A62C1D8 /* Sub2APIBoardWidget.swift in Sources */,
@@ -367,7 +373,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -386,7 +392,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.4.0;
+				MARKETING_VERSION = 0.5.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -433,7 +439,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -446,7 +452,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.4.0;
+				MARKETING_VERSION = 0.5.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

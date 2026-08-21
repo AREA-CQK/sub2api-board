@@ -57,6 +57,7 @@ final class BoardViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         do {
+            try SharedStore.saveSettings(settings)
             async let newSnapshot = client.fetchBoard(settings: settings)
             async let newAccounts = client.fetchAccounts(settings: settings)
             let values = try await (newSnapshot, newAccounts)

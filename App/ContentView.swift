@@ -12,7 +12,9 @@ struct ContentView: View {
                 LoginView()
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(BoardTheme.canvas.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+        .tint(BoardTheme.accent)
         .alert("请求失败", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("好") { model.errorMessage = nil }
         } message: {
@@ -31,8 +33,8 @@ private struct DashboardView: View {
             if let snapshot = model.snapshot {
                 VStack(alignment: .leading, spacing: 16) {
                     header(snapshot)
-                    statGrid(snapshot.dashboard)
                     accountSection(snapshot.accounts)
+                    statGrid(snapshot.dashboard)
                     trendChart(snapshot)
                 }
                 .padding(.horizontal, 20)
@@ -46,15 +48,19 @@ private struct DashboardView: View {
                     .frame(maxWidth: .infinity, minHeight: 500)
             }
         }
+        .background(BoardTheme.canvas)
         .task { await model.refresh() }
     }
 
     private func header(_ snapshot: BoardSnapshot) -> some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 4) {
+                Text("SUB2API // QUOTA CONSOLE")
+                    .font(.caption2.weight(.bold).monospaced())
+                    .foregroundStyle(BoardTheme.accent)
                 Text("运行总览").font(.title2.bold())
-                Text("更新于 \(snapshot.generatedAt.formatted(date: .omitted, time: .shortened))")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("SYNC \(snapshot.generatedAt.formatted(date: .omitted, time: .shortened))")
+                    .font(.caption.monospaced()).foregroundStyle(BoardTheme.secondaryText)
             }
             Spacer()
             if model.isLoading {
@@ -64,13 +70,14 @@ private struct DashboardView: View {
                 Label("数据聚合延迟", systemImage: "clock.badge.exclamationmark")
                     .font(.caption).foregroundStyle(.orange)
             }
-            Divider().frame(height: 18)
+            Divider().overlay(BoardTheme.border).frame(height: 22)
             Button {
                 Task { await model.refresh() }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.borderless)
+            .foregroundStyle(BoardTheme.accent)
             .disabled(model.isLoading)
             .help("立即刷新")
 
@@ -120,14 +127,14 @@ private struct DashboardView: View {
             }
             Chart(snapshot.trend, id: \.date) { point in
                 AreaMark(x: .value("日期", point.date), y: .value(chartMetric.title, chartMetric.value(point)))
-                    .foregroundStyle(.teal.opacity(0.12))
+                    .foregroundStyle(BoardTheme.accent.opacity(0.13))
                     .interpolationMethod(.catmullRom)
                 LineMark(x: .value("日期", point.date), y: .value(chartMetric.title, chartMetric.value(point)))
-                    .foregroundStyle(.teal)
+                    .foregroundStyle(BoardTheme.accent)
                     .lineStyle(StrokeStyle(lineWidth: 2))
                     .interpolationMethod(.catmullRom)
                 PointMark(x: .value("日期", point.date), y: .value(chartMetric.title, chartMetric.value(point)))
-                    .foregroundStyle(hoveredDate == point.date ? Color.orange : Color.teal)
+                    .foregroundStyle(hoveredDate == point.date ? BoardTheme.warning : BoardTheme.accent)
                     .symbolSize(hoveredDate == point.date ? 70 : 24)
                 if hoveredDate == point.date {
                     RuleMark(x: .value("日期", point.date))
@@ -170,7 +177,12 @@ private struct DashboardView: View {
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("账号").font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("账号额度").font(.headline)
+                    Text("USAGE QUOTA // HIGHEST FIRST")
+                        .font(.caption2.weight(.medium).monospaced())
+                        .foregroundStyle(BoardTheme.secondaryText)
+                }
                 Spacer()
                 SettingsLink { Text("管理").font(.caption) }.buttonStyle(.link)
             }
@@ -219,9 +231,18 @@ private struct MetricTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack { Label(title, systemImage: icon).font(.caption).foregroundStyle(.secondary); Spacer() }
-            Text(value).font(.system(size: 25, weight: .semibold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.75)
-            Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            HStack {
+                Label(title.uppercased(), systemImage: icon)
+                    .font(.caption2.weight(.semibold).monospaced())
+                    .foregroundStyle(BoardTheme.secondaryText)
+                Spacer()
+                Circle().fill(BoardTheme.signal).frame(width: 5, height: 5)
+            }
+            Text(value)
+                .font(.system(size: 25, weight: .semibold, design: .monospaced))
+                .foregroundStyle(BoardTheme.primaryText)
+                .lineLimit(1).minimumScaleFactor(0.75)
+            Text(detail).font(.caption.monospacedDigit()).foregroundStyle(BoardTheme.secondaryText).lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .panelStyle()
@@ -233,28 +254,34 @@ private struct AccountUsageCard: View {
     let reservedWindowCount: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Circle().fill(isHealthy ? Color.green : Color.red).frame(width: 8, height: 8)
-                Text(metric.account.name).font(.headline).lineLimit(1)
-                Text(metric.account.platform.capitalized).font(.caption).foregroundStyle(.secondary)
+                Circle().fill(isHealthy ? BoardTheme.healthy : BoardTheme.critical).frame(width: 8, height: 8)
+                Text(metric.account.name).font(.headline.monospaced()).lineLimit(1)
+                Text(metric.account.platform.uppercased()).font(.caption2.monospaced()).foregroundStyle(BoardTheme.secondaryText)
                 Spacer()
-                Text(isHealthy ? "正常" : "异常").font(.caption.weight(.medium)).foregroundStyle(isHealthy ? .green : .red)
+                Text(isHealthy ? "ONLINE" : "ERROR")
+                    .font(.caption2.weight(.bold).monospaced())
+                    .foregroundStyle(isHealthy ? BoardTheme.healthy : BoardTheme.critical)
             }
-            if metric.usageWindows.isEmpty {
-                Text(metric.error ?? "暂无额度数据")
-                    .font(.callout).foregroundStyle(metric.error == nil ? Color.secondary : Color.orange)
-                    .frame(maxWidth: .infinity, minHeight: AppUsageWindowRow.height, alignment: .leading)
-            } else {
-                ForEach(Array(metric.usageWindows.enumerated()), id: \.offset) { _, item in
-                    AppUsageWindowRow(name: item.name, window: item.window)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if metric.usageWindows.isEmpty {
+                    Text(metric.error ?? "暂无额度数据")
+                        .font(.callout).foregroundStyle(metric.error == nil ? Color.secondary : Color.orange)
+                        .frame(maxWidth: .infinity, minHeight: AppUsageWindowRow.height, alignment: .leading)
+                } else {
+                    ForEach(Array(metric.usageWindows.enumerated()), id: \.offset) { _, item in
+                        AppUsageWindowRow(name: item.name, window: item.window)
+                    }
+                }
+                if occupiedWindowCount < reservedWindowCount {
+                    ForEach(occupiedWindowCount..<reservedWindowCount, id: \.self) { _ in
+                        Color.clear.frame(height: AppUsageWindowRow.height)
+                    }
                 }
             }
-            if occupiedWindowCount < reservedWindowCount {
-                ForEach(occupiedWindowCount..<reservedWindowCount, id: \.self) { _ in
-                    Color.clear.frame(height: AppUsageWindowRow.height)
-                }
-            }
+            .padding(.top, 16)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .panelStyle()
@@ -265,13 +292,13 @@ private struct AccountUsageCard: View {
 }
 
 private struct AppUsageWindowRow: View {
-    static let height: CGFloat = 43
+    static let height: CGFloat = 44
 
     let name: String
     let window: UsageWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 7) {
             if let stats = window.windowStats, stats.requests > 0 || stats.tokens > 0 {
                 HStack(spacing: 8) {
                     stat("\(CompactFormat.number(stats.requests)) req")
@@ -282,27 +309,56 @@ private struct AppUsageWindowRow: View {
                     if let userCost = stats.userCost { separator; stat("用户 \(CompactFormat.money(userCost))") }
                     Spacer(minLength: 0)
                 }
-                .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                .font(.caption.monospacedDigit()).foregroundStyle(BoardTheme.secondaryText)
             } else {
-                Color.clear.frame(height: 17)
+                Color.clear.frame(height: 15)
             }
             HStack(spacing: 10) {
-                Text(name).font(.callout.weight(.semibold)).foregroundStyle(color).frame(width: 38, alignment: .leading)
-                ProgressView(value: min(max(window.utilization, 0), 100), total: 100).tint(color)
-                Text("\(Int(window.utilization.rounded()))%").font(.callout.monospacedDigit()).frame(width: 42, alignment: .trailing)
-                Text(CompactFormat.resetTime(for: window)).font(.callout.monospacedDigit()).foregroundStyle(.secondary).frame(width: 66, alignment: .trailing)
+                Text(name.uppercased())
+                    .font(.caption.weight(.bold).monospaced())
+                    .foregroundStyle(color)
+                    .frame(width: 42, alignment: .leading)
+                QuotaProgressBar(value: window.utilization, color: color)
+                Text("已用 \(Int(window.utilization.rounded()))%")
+                    .font(.callout.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(color)
+                    .frame(width: 82, alignment: .trailing)
+                Text("重置 \(CompactFormat.resetTime(for: window))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(BoardTheme.secondaryText)
+                    .frame(width: 92, alignment: .trailing)
             }
         }
         .frame(height: Self.height, alignment: .top)
     }
 
-    private var color: Color { window.utilization >= 100 ? .red : window.utilization >= 80 ? .orange : .green }
+    private var color: Color { BoardTheme.quotaColor(utilization: window.utilization) }
     private func stat(_ value: String) -> some View { Text(value).lineLimit(1) }
     private var separator: some View { Rectangle().fill(.quaternary).frame(width: 1, height: 14) }
 }
 
+private struct QuotaProgressBar: View {
+    let value: Double
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 3).fill(BoardTheme.track)
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(color)
+                    .frame(width: geometry.size.width * min(max(value, 0), 100) / 100)
+            }
+        }
+        .frame(height: 10)
+        .overlay(RoundedRectangle(cornerRadius: 3).stroke(BoardTheme.border.opacity(0.8), lineWidth: 1))
+    }
+}
+
 private extension View {
     func panelStyle() -> some View {
-        padding(14).background(.background.secondary, in: RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator.opacity(0.5)))
+        padding(14)
+            .background(BoardTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(BoardTheme.border, lineWidth: 1))
     }
 }

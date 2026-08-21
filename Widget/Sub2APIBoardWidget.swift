@@ -1,5 +1,20 @@
+import AppIntents
 import SwiftUI
 import WidgetKit
+
+struct RefreshBoardIntent: AppIntent {
+    static let title: LocalizedStringResource = "刷新 Sub2API 数据"
+    static let description = IntentDescription("立即读取账号额度和看板数据。")
+    static let openAppWhenRun = false
+
+    func perform() async throws -> some IntentResult {
+        let settings = SharedStore.loadSettings()
+        let snapshot = try await Sub2APIClient().fetchBoard(settings: settings)
+        try SharedStore.saveSnapshot(snapshot)
+        WidgetCenter.shared.reloadAllTimelines()
+        return .result()
+    }
+}
 
 struct BoardEntry: TimelineEntry {
     let date: Date
@@ -61,7 +76,9 @@ struct BoardWidgetView: View {
                 .foregroundStyle(.secondary)
             }
         }
-        .containerBackground(for: .widget) { Color(nsColor: .windowBackgroundColor) }
+        .foregroundStyle(BoardTheme.primaryText)
+        .preferredColorScheme(.dark)
+        .containerBackground(for: .widget) { BoardTheme.canvas }
     }
 }
 
@@ -71,36 +88,60 @@ private struct SmallBoardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            WidgetHeader(snapshot: snapshot, hasError: hasError)
-            Spacer(minLength: 0)
-            Text(CompactFormat.number(snapshot.dashboard.todayRequests))
-                .font(.system(size: 30, weight: .bold, design: .rounded))
-                .minimumScaleFactor(0.7)
-            Text("今日请求").font(.caption).foregroundStyle(.secondary)
-            Divider()
-            HStack {
-                Label(CompactFormat.number(snapshot.dashboard.todayTokens), systemImage: "cube")
-                Spacer()
-                Text(CompactFormat.money(snapshot.dashboard.todayActualCost))
-            }
-            .font(.caption.weight(.medium))
+            WidgetHeader(snapshot: snapshot, hasError: hasError, showsTimestamp: false)
             TimelineView(.periodic(from: .now, by: 3)) { context in
-                HStack(spacing: 5) {
-                    if let metric = rotatingAccounts(snapshot.accounts, visibleCount: 1, at: context.date).first {
-                        Circle().fill(accountColor(metric)).frame(width: 6, height: 6)
-                        Text(metric.account.name).lineLimit(1)
-                        Spacer(minLength: 2)
-                        if let utilization = accountUtilization(metric) {
-                            Text("\(Int(utilization.rounded()))%")
-                                .monospacedDigit()
+                if let metric = rotatingAccounts(snapshot.accounts, visibleCount: 1, at: context.date).first {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 5) {
+                            Circle().fill(accountColor(metric)).frame(width: 6, height: 6)
+                            Text(metric.account.name)
+                                .font(.caption.weight(.semibold).monospaced())
+                                .lineLimit(1)
+                            Spacer(minLength: 2)
+                            Text(metric.account.platform.uppercased())
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundStyle(BoardTheme.secondaryText)
                         }
-                    } else {
+                        if let quota = accountQuota(metric) {
+                            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                                Text("\(Int(quota.utilization.rounded()))")
+                                    .font(.system(size: 30, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(quota.color)
+                                    .minimumScaleFactor(0.7)
+                                Text("% 已用")
+                                    .font(.caption2.weight(.semibold).monospaced())
+                                    .foregroundStyle(quota.color)
+                                Spacer(minLength: 0)
+                            }
+                            WidgetProgressBar(value: quota.utilization, color: quota.color)
+                            HStack {
+                                Text(quota.name.uppercased())
+                                Spacer()
+                                Text("RESET \(quota.resetText)")
+                            }
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(BoardTheme.secondaryText)
+                        } else {
+                            Text("暂无额度数据").font(.caption).foregroundStyle(BoardTheme.secondaryText)
+                        }
+                    }
+                } else {
+                    HStack(spacing: 5) {
                         Circle().fill(snapshot.dashboard.errorAccounts == 0 ? Color.green : Color.red).frame(width: 6, height: 6)
                         Text("账号 \(snapshot.dashboard.normalAccounts)/\(snapshot.dashboard.totalAccounts)")
                     }
+                    .font(.caption2).foregroundStyle(BoardTheme.secondaryText)
                 }
-                .font(.caption2).foregroundStyle(.secondary)
             }
+            Spacer(minLength: 0)
+            Rectangle().fill(BoardTheme.border).frame(height: 1)
+            HStack {
+                Label(CompactFormat.number(snapshot.dashboard.todayRequests), systemImage: "arrow.up.arrow.down")
+                Spacer()
+                Label(CompactFormat.number(snapshot.dashboard.todayTokens), systemImage: "cube")
+            }
+            .font(.system(size: 9, weight: .medium, design: .monospaced))
+            .foregroundStyle(BoardTheme.secondaryText)
         }
     }
 }
@@ -120,22 +161,22 @@ private struct MediumBoardView: View {
                 Text("\(Int(snapshot.dashboard.rpm)) RPM")
             }
             .font(.caption2.monospacedDigit())
-            .foregroundStyle(.secondary)
-            Divider()
+            .foregroundStyle(BoardTheme.secondaryText)
+            Rectangle().fill(BoardTheme.border).frame(height: 1)
             TimelineView(.periodic(from: .now, by: 3)) { context in
                 if let metric = rotatingAccounts(snapshot.accounts, visibleCount: 1, at: context.date).first {
                     VStack(alignment: .leading, spacing: 3) {
                         DetailedAccountSection(metric: metric, maxWindows: 3)
                         if snapshot.accounts.count > 1 {
                             Text("每 3 秒轮换 · 共 \(snapshot.accounts.count) 个账号")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(BoardTheme.secondaryText)
                         }
                     }
                 } else {
                     Text("在 App 中选择账号")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BoardTheme.secondaryText)
                 }
             }
             Spacer(minLength: 0)
@@ -155,11 +196,15 @@ private struct LargeBoardView: View {
                 WidgetMetric(title: "今日 Token", value: CompactFormat.number(snapshot.dashboard.todayTokens))
                 WidgetMetric(title: "实际费用", value: CompactFormat.money(snapshot.dashboard.todayActualCost))
             }
-            Divider()
+            Rectangle().fill(BoardTheme.border).frame(height: 1)
             HStack(spacing: 8) {
-                Text("账号").font(.caption.weight(.semibold))
+                Text("ACCOUNT // QUOTA USAGE")
+                    .font(.caption2.weight(.bold).monospaced())
+                    .foregroundStyle(BoardTheme.accent)
                 Spacer()
-                Text("正常 \(snapshot.dashboard.normalAccounts) · 异常 \(snapshot.dashboard.errorAccounts)").font(.caption2).foregroundStyle(.secondary)
+                Text("ONLINE \(snapshot.dashboard.normalAccounts) · ERROR \(snapshot.dashboard.errorAccounts)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(BoardTheme.secondaryText)
             }
             TimelineView(.periodic(from: .now, by: 3)) { context in
                 VStack(alignment: .leading, spacing: 10) {
@@ -176,6 +221,7 @@ private struct LargeBoardView: View {
 private struct WidgetHeader: View {
     let snapshot: BoardSnapshot
     let hasError: Bool
+    var showsTimestamp = true
 
     var body: some View {
         HStack {
@@ -183,11 +229,26 @@ private struct WidgetHeader: View {
                 Image("BrandMark").resizable().scaledToFit().frame(width: 16, height: 16)
                 Text("Sub2API")
             }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.teal)
+            .font(.caption.weight(.semibold).monospaced())
+            .foregroundStyle(BoardTheme.accent)
             Spacer()
-            Image(systemName: hasError ? "exclamationmark.icloud" : "checkmark.icloud")
-                .font(.caption2).foregroundStyle(hasError ? .orange : .secondary)
+            if showsTimestamp {
+                Text(snapshot.generatedAt.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(BoardTheme.secondaryText)
+            }
+            HStack(spacing: 7) {
+                Image(systemName: hasError ? "exclamationmark.icloud" : "checkmark.icloud")
+                    .font(.caption2)
+                    .foregroundStyle(hasError ? BoardTheme.warning : BoardTheme.secondaryText)
+                Button(intent: RefreshBoardIntent()) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption2.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(BoardTheme.accent)
+                .accessibilityLabel("刷新数据")
+            }
         }
     }
 }
@@ -197,11 +258,18 @@ private struct WidgetMetric: View {
     let value: String
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.caption2).foregroundStyle(.secondary)
-            Text(value).font(.headline.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.7)
+            Text(title.uppercased())
+                .font(.caption2.weight(.medium).monospaced())
+                .foregroundStyle(BoardTheme.secondaryText)
+            Text(value)
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(BoardTheme.primaryText)
+                .lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        .padding(8)
+        .background(BoardTheme.surface, in: RoundedRectangle(cornerRadius: 5))
+        .overlay(RoundedRectangle(cornerRadius: 5).stroke(BoardTheme.border, lineWidth: 1))
     }
 }
 
@@ -209,15 +277,18 @@ private struct CompactAccountRow: View {
     let metric: AccountMetric
     var body: some View {
         HStack(spacing: 7) {
-            Circle().fill(metric.account.status == "active" && metric.account.schedulable ? Color.green : Color.red).frame(width: 6, height: 6)
-            Text(metric.account.name).font(.caption).lineLimit(1)
+            Circle().fill(accountColor(metric)).frame(width: 6, height: 6)
+            Text(metric.account.name).font(.caption.monospaced()).lineLimit(1)
             Spacer(minLength: 6)
             if let window = metric.primaryWindow {
-                WidgetProgressBar(value: window.value, color: window.value >= 90 ? .red : window.value >= 70 ? .orange : .teal)
+                WidgetProgressBar(value: window.value, color: BoardTheme.quotaColor(utilization: window.value))
                     .frame(width: 48)
-                Text("\(Int(window.value.rounded()))%").font(.caption2.monospacedDigit()).frame(width: 30, alignment: .trailing)
+                Text("用 \(Int(window.value.rounded()))%")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(BoardTheme.quotaColor(utilization: window.value))
+                    .frame(width: 42, alignment: .trailing)
             } else {
-                Text("--").font(.caption2).foregroundStyle(.secondary)
+                Text("--").font(.caption2).foregroundStyle(BoardTheme.secondaryText)
             }
         }
     }
@@ -231,20 +302,20 @@ private struct DetailedAccountSection: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Circle().fill(accountColor(metric)).frame(width: 6, height: 6)
-                Text(metric.account.name).font(.caption.weight(.semibold)).lineLimit(1)
-                Text(metric.account.platform.capitalized)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                Text(metric.account.name).font(.caption.weight(.semibold).monospaced()).lineLimit(1)
+                Text(metric.account.platform.uppercased())
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(BoardTheme.secondaryText)
                 Spacer(minLength: 4)
                 if metric.usage?.source == "passive" {
-                    Text("被动采样").font(.caption2).foregroundStyle(.tertiary)
+                    Text("PASSIVE").font(.caption2.monospaced()).foregroundStyle(BoardTheme.secondaryText)
                 }
             }
 
             if metric.usageWindows.isEmpty {
                 Text(metric.error ?? "暂无窗口数据")
                     .font(.caption2)
-                    .foregroundStyle(metric.error == nil ? Color.secondary : Color.orange)
+                    .foregroundStyle(metric.error == nil ? BoardTheme.secondaryText : BoardTheme.warning)
                     .lineLimit(1)
             } else {
                 ForEach(Array(metric.usageWindows.prefix(maxWindows).enumerated()), id: \.offset) { _, item in
@@ -259,23 +330,26 @@ private struct UsageWindowRow: View {
     let name: String
     let window: UsageWindow
 
+    private var color: Color { BoardTheme.quotaColor(utilization: window.utilization) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if let stats = window.windowStats, stats.requests > 0 || stats.tokens > 0 {
                 WindowStatsLine(stats: stats)
             }
             HStack(spacing: 6) {
-                Text(name)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(windowColor(window.utilization))
-                    .frame(width: 28, alignment: .leading)
-                WidgetProgressBar(value: window.utilization, color: windowColor(window.utilization))
-                Text("\(Int(window.utilization.rounded()))%")
+                Text(name.uppercased())
+                    .font(.caption2.weight(.semibold).monospaced())
+                    .foregroundStyle(color)
+                    .frame(width: 32, alignment: .leading)
+                WidgetProgressBar(value: window.utilization, color: color)
+                Text("用 \(Int(window.utilization.rounded()))%")
                     .font(.caption2.monospacedDigit())
-                    .frame(width: 34, alignment: .trailing)
+                    .foregroundStyle(color)
+                    .frame(width: 46, alignment: .trailing)
                 Text(CompactFormat.resetTime(for: window))
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BoardTheme.secondaryText)
                     .frame(width: 45, alignment: .trailing)
             }
         }
@@ -290,13 +364,14 @@ private struct WidgetProgressBar: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary)
-                Capsule()
+                RoundedRectangle(cornerRadius: 2.5).fill(BoardTheme.track)
+                RoundedRectangle(cornerRadius: 2.5)
                     .fill(color)
                     .frame(width: geometry.size.width * min(max(value, 0), 100) / 100)
             }
         }
-        .frame(height: 4)
+        .frame(height: 7)
+        .overlay(RoundedRectangle(cornerRadius: 2.5).stroke(BoardTheme.border.opacity(0.8), lineWidth: 0.5))
     }
 }
 
@@ -316,8 +391,8 @@ private struct WindowStatsLine: View {
             }
             Spacer(minLength: 0)
         }
-        .font(.system(size: 11, weight: .regular, design: .rounded).monospacedDigit())
-        .foregroundStyle(.secondary)
+        .font(.system(size: 11, weight: .regular, design: .monospaced).monospacedDigit())
+        .foregroundStyle(BoardTheme.secondaryText)
         .lineLimit(1)
         .minimumScaleFactor(0.68)
     }
@@ -325,12 +400,40 @@ private struct WindowStatsLine: View {
     private func stat(_ value: String) -> some View { Text(value).fixedSize() }
 
     private var separator: some View {
-        Rectangle().fill(.quaternary).frame(width: 1, height: 11)
+        Rectangle().fill(BoardTheme.border).frame(width: 1, height: 11)
     }
 }
 
 private func accountColor(_ metric: AccountMetric) -> Color {
-    metric.account.status == "active" && metric.account.schedulable ? .green : .red
+    metric.account.status == "active" && metric.account.schedulable ? BoardTheme.healthy : BoardTheme.critical
+}
+
+private struct AccountQuota {
+    let name: String
+    let utilization: Double
+    let resetText: String
+
+    var color: Color { BoardTheme.quotaColor(utilization: utilization) }
+}
+
+private func accountQuota(_ metric: AccountMetric) -> AccountQuota? {
+    if let item = metric.usageWindows.max(by: { $0.window.utilization < $1.window.utilization }) {
+        return AccountQuota(
+            name: item.name,
+            utilization: item.window.utilization,
+            resetText: CompactFormat.resetTime(for: item.window)
+        )
+    }
+
+    if let primary = metric.primaryWindow {
+        return AccountQuota(
+            name: primary.name,
+            utilization: primary.value,
+            resetText: "--"
+        )
+    }
+
+    return nil
 }
 
 private func accountUtilization(_ metric: AccountMetric) -> Double? {
@@ -361,12 +464,6 @@ private func rotatingAccounts(_ accounts: [AccountMetric], visibleCount: Int, at
     let page = Int(date.timeIntervalSince1970 / 3)
     let start = (page * count) % sorted.count
     return (0..<count).map { sorted[(start + $0) % sorted.count] }
-}
-
-private func windowColor(_ utilization: Double) -> Color {
-    if utilization >= 100 { return .red }
-    if utilization >= 80 { return .orange }
-    return .green
 }
 
 struct Sub2APIBoardWidget: Widget {

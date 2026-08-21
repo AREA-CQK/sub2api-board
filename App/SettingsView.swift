@@ -20,17 +20,19 @@ struct SettingsView: View {
                     List(model.accounts) { account in
                         Toggle(isOn: selectedBinding(account.id)) {
                             HStack {
-                                Circle().fill(account.status == "active" ? Color.green : Color.red).frame(width: 7, height: 7)
-                                Text(account.name).lineLimit(1)
+                                Circle().fill(account.status == "active" ? BoardTheme.healthy : BoardTheme.critical).frame(width: 7, height: 7)
+                                Text(account.name).font(.body.monospaced()).lineLimit(1)
                                 Spacer()
-                                Text(account.platform.capitalized).foregroundStyle(.secondary)
+                                Text(account.platform.uppercased())
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(BoardTheme.secondaryText)
                             }
                         }
                     }
                     .frame(height: 210)
                 }
                 Text("最多选择 6 个；未选择时默认展示前 6 个启用账号。")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption.monospaced()).foregroundStyle(BoardTheme.secondaryText)
             }
             HStack {
                 Spacer()
@@ -38,10 +40,14 @@ struct SettingsView: View {
                     guard model.saveSettings() else { return }
                     Task { await model.refresh() }
                 }
-                .buttonStyle(.borderedProminent).tint(.teal)
+                .buttonStyle(.borderedProminent).tint(BoardTheme.accent)
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(BoardTheme.canvas)
+        .preferredColorScheme(.dark)
+        .tint(BoardTheme.accent)
         .task { if model.accounts.isEmpty { await model.loadAccounts() } }
     }
 
@@ -54,6 +60,7 @@ struct SettingsView: View {
             } else if !selected {
                 model.settings.selectedAccountIDs.removeAll { $0 == id }
             }
+            _ = model.saveSettings()
         }
     }
 }

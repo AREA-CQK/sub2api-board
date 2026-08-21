@@ -13,8 +13,10 @@ struct LoginView: View {
                 .scaledToFit()
                 .frame(width: 72, height: 72)
             VStack(spacing: 5) {
-                Text("Sub2API Board").font(.title.bold())
-                Text("连接你的 Sub2API 管理后台").foregroundStyle(.secondary)
+                Text("SUB2API BOARD").font(.title.bold().monospaced())
+                Text("QUOTA CONSOLE // SECURE ACCESS")
+                    .font(.caption.weight(.medium).monospaced())
+                    .foregroundStyle(BoardTheme.accent)
             }
             Form {
                 TextField("服务地址", text: $model.settings.serverURL, prompt: Text("https://sub2api.example.com"))
@@ -30,6 +32,9 @@ struct LoginView: View {
             }
             .formStyle(.grouped)
             .scrollDisabled(true)
+            .scrollContentBackground(.hidden)
+            .background(BoardTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(BoardTheme.border, lineWidth: 1))
             Button {
                 Task {
                     if model.needsTOTP { await model.completeTOTP(code: totpCode) }
@@ -40,12 +45,15 @@ struct LoginView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.teal)
+            .tint(BoardTheme.accent)
             .disabled(model.isLoading || model.settings.serverURL.isEmpty || (model.needsTOTP ? totpCode.count < 6 : email.isEmpty || password.isEmpty))
             Text("登录令牌保存在 macOS Keychain 中，Widget 不保存账号密码。")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption.monospaced()).foregroundStyle(BoardTheme.secondaryText)
         }
         .padding(36)
         .frame(width: 460)
+        .background(BoardTheme.canvas)
+        .preferredColorScheme(.dark)
+        .tint(BoardTheme.accent)
     }
 }

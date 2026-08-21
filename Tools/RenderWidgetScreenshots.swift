@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import SwiftUI
 import WidgetKit
 
@@ -28,7 +29,8 @@ struct RenderWidgetScreenshots {
             )
             .padding(16)
             .frame(width: screenshot.size.width, height: screenshot.size.height)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(BoardTheme.canvas)
+            .environment(\.colorScheme, .dark)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
             let renderer = ImageRenderer(content: view)
@@ -44,5 +46,6 @@ struct RenderWidgetScreenshots {
                 options: Data.WritingOptions.atomic
             )
         }
+        exit(EXIT_SUCCESS)
     }
 }

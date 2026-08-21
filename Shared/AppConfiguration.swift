@@ -60,14 +60,15 @@ enum SharedStore {
     private static let snapshotKeychainAccount = "snapshot.v1"
 
     static func loadSettings() -> BoardSettings {
-        if let data = try? KeychainStore.loadSharedData(account: settingsKeychainAccount),
-           let value = try? JSONDecoder.sub2api.decode(BoardSettings.self, from: data) {
-            return value
-        }
         if let value: BoardSettings = loadFile(named: settingsFile) {
             if let data = try? JSONEncoder.sub2api.encode(value) {
                 try? KeychainStore.saveSharedData(data, account: settingsKeychainAccount)
             }
+            return value
+        }
+        if let data = try? KeychainStore.loadSharedData(account: settingsKeychainAccount),
+           let value = try? JSONDecoder.sub2api.decode(BoardSettings.self, from: data) {
+            try? writeFile(data, named: settingsFile)
             return value
         }
         guard let data = AppConfiguration.defaults.data(forKey: settingsKey),
@@ -81,21 +82,22 @@ enum SharedStore {
 
     static func saveSettings(_ settings: BoardSettings) throws {
         let data = try JSONEncoder.sub2api.encode(settings)
-        try KeychainStore.saveSharedData(data, account: settingsKeychainAccount)
-        try? writeFile(data, named: settingsFile)
+        try writeFile(data, named: settingsFile)
         AppConfiguration.defaults.set(data, forKey: settingsKey)
         AppConfiguration.defaults.synchronize()
+        try? KeychainStore.saveSharedData(data, account: settingsKeychainAccount)
     }
 
     static func loadSnapshot() -> BoardSnapshot? {
-        if let data = try? KeychainStore.loadSharedData(account: snapshotKeychainAccount),
-           let value = try? JSONDecoder.sub2api.decode(BoardSnapshot.self, from: data) {
-            return value
-        }
         if let value: BoardSnapshot = loadFile(named: snapshotFile) {
             if let data = try? JSONEncoder.sub2api.encode(value) {
                 try? KeychainStore.saveSharedData(data, account: snapshotKeychainAccount)
             }
+            return value
+        }
+        if let data = try? KeychainStore.loadSharedData(account: snapshotKeychainAccount),
+           let value = try? JSONDecoder.sub2api.decode(BoardSnapshot.self, from: data) {
+            try? writeFile(data, named: snapshotFile)
             return value
         }
         guard let data = AppConfiguration.defaults.data(forKey: snapshotKey),
@@ -109,10 +111,10 @@ enum SharedStore {
 
     static func saveSnapshot(_ snapshot: BoardSnapshot) throws {
         let data = try JSONEncoder.sub2api.encode(snapshot)
-        try KeychainStore.saveSharedData(data, account: snapshotKeychainAccount)
-        try? writeFile(data, named: snapshotFile)
+        try writeFile(data, named: snapshotFile)
         AppConfiguration.defaults.set(data, forKey: snapshotKey)
         AppConfiguration.defaults.synchronize()
+        try? KeychainStore.saveSharedData(data, account: snapshotKeychainAccount)
     }
 
     static func clearSnapshot() {
