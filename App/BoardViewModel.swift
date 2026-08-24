@@ -11,9 +11,11 @@ final class BoardViewModel: ObservableObject {
     @Published var isAuthenticated = (try? KeychainStore.load()) != nil
     @Published var errorMessage: String?
     @Published var needsTOTP = false
+    @Published private(set) var lastRefreshAt: Date?
 
     private let client = Sub2APIClient()
     private var tempToken: String?
+    private var isRefreshing = false
 
     func login(email: String, password: String) async {
         guard saveSettings() else { return }
@@ -50,12 +52,18 @@ final class BoardViewModel: ObservableObject {
     }
 
     func refresh() async {
+        guard !isRefreshing else { return }
         guard settings.apiBaseURL != nil else {
             errorMessage = APIError.invalidServerURL.localizedDescription
             return
         }
+        isRefreshing = true
         isLoading = true
         errorMessage = nil
+        defer {
+            isRefreshing = false
+            isLoading = false
+        }
         do {
             try SharedStore.saveSettings(settings)
             async let newSnapshot = client.fetchBoard(settings: settings)
@@ -64,6 +72,7 @@ final class BoardViewModel: ObservableObject {
             snapshot = values.0
             accounts = values.1
             try SharedStore.saveSnapshot(values.0)
+            lastRefreshAt = Date()
             WidgetCenter.shared.reloadAllTimelines()
         } catch APIError.unauthorized {
             isAuthenticated = false
@@ -71,7 +80,6 @@ final class BoardViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     func loadAccounts() async {

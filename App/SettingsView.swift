@@ -7,7 +7,7 @@ struct SettingsView: View {
         Form {
             Section("连接") {
                 TextField("服务地址", text: $model.settings.serverURL)
-                Picker("Widget 刷新间隔", selection: $model.settings.refreshMinutes) {
+                Picker("App 与 Widget 刷新间隔", selection: $model.settings.refreshMinutes) {
                     ForEach(BoardSettings.refreshMinuteOptions, id: \.self) { minutes in
                         Text("\(minutes) 分钟").tag(minutes)
                     }

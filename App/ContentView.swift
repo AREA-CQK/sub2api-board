@@ -1,7 +1,9 @@
+import AppKit
 import Charts
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var model: BoardViewModel
 
     var body: some View {
@@ -15,12 +17,49 @@ struct ContentView: View {
         .background(BoardTheme.canvas.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .tint(BoardTheme.accent)
+        .task(id: refreshSchedule) {
+            await runAutoRefresh(schedule: refreshSchedule)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didDeminiaturizeNotification)) { _ in
+            guard model.isAuthenticated else { return }
+            Task { await model.refresh() }
+        }
         .alert("请求失败", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("好") { model.errorMessage = nil }
         } message: {
             Text(model.errorMessage ?? "未知错误")
         }
     }
+
+    private var refreshSchedule: RefreshSchedule {
+        RefreshSchedule(
+            minutes: model.settings.effectiveRefreshMinutes,
+            isActive: scenePhase == .active,
+            isAuthenticated: model.isAuthenticated
+        )
+    }
+
+    private func runAutoRefresh(schedule: RefreshSchedule) async {
+        guard schedule.isActive, schedule.isAuthenticated else { return }
+        await model.refresh()
+
+        let nanoseconds = UInt64(schedule.minutes) * 60 * 1_000_000_000
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(nanoseconds: nanoseconds)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await model.refresh()
+        }
+    }
+}
+
+private struct RefreshSchedule: Equatable {
+    let minutes: Int
+    let isActive: Bool
+    let isAuthenticated: Bool
 }
 
 private struct DashboardView: View {
@@ -49,7 +88,6 @@ private struct DashboardView: View {
             }
         }
         .background(BoardTheme.canvas)
-        .task { await model.refresh() }
     }
 
     private func header(_ snapshot: BoardSnapshot) -> some View {
@@ -59,7 +97,7 @@ private struct DashboardView: View {
                     .font(.caption2.weight(.bold).monospaced())
                     .foregroundStyle(BoardTheme.accent)
                 Text("运行总览").font(.title2.bold())
-                Text("SYNC \(snapshot.generatedAt.formatted(date: .omitted, time: .shortened))")
+                Text("SYNC \((model.lastRefreshAt ?? snapshot.generatedAt).formatted(date: .omitted, time: .shortened))")
                     .font(.caption.monospaced()).foregroundStyle(BoardTheme.secondaryText)
             }
             Spacer()
