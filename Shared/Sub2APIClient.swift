@@ -91,6 +91,16 @@ actor Sub2APIClient {
         }
     }
 
+    func fetchOpenAIResetCredits(settings: BoardSettings, accountID: Int) async throws -> OpenAIQuotaRefreshResponse {
+        try await send(
+            settings: settings,
+            path: "admin/openai/accounts/\(accountID)/quota/refresh",
+            method: "POST",
+            body: Optional<String>.none,
+            timeoutInterval: 30
+        )
+    }
+
     func fetchBoard(settings: BoardSettings) async throws -> BoardSnapshot {
         async let dashboard = fetchDashboard(settings: settings)
         async let allAccounts = fetchAccounts(settings: settings)
@@ -109,7 +119,13 @@ actor Sub2APIClient {
             dashboard: dashboardData.stats,
             trend: dashboardData.trend,
             accounts: selected.map { account in
-                AccountMetric(account: account, usage: usageResult.usage[String(account.id)], today: today[String(account.id)], error: usageResult.errors[String(account.id)])
+                AccountMetric(
+                    account: account,
+                    usage: usageResult.usage[String(account.id)],
+                    today: today[String(account.id)],
+                    error: usageResult.errors[String(account.id)],
+                    resetCredits: account.cachedResetCredits
+                )
             }
         )
     }

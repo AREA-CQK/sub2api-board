@@ -56,6 +56,102 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(metric.primaryWindow?.value, 32)
     }
 
+    func testOpenAIAccountDecodesCachedResetCredits() throws {
+        let json = #"""
+        {"id":7,"name":"Codex","platform":"openai","type":"oauth","status":"active","schedulable":true,"quota_limit":null,"quota_used":null,"quota_daily_limit":null,"quota_daily_used":null,"quota_weekly_limit":null,"quota_weekly_used":null,"extra":{"codex_reset_credit_snapshot":{"available_count":2,"credits":[{"expires_at":"2026-09-21T07:41:00Z"},{"expires_at":"2026-10-01T07:41:00Z"}]}}}
+        """#.data(using: .utf8)!
+        let account = try JSONDecoder.sub2api.decode(Account.self, from: json)
+
+        XCTAssertEqual(account.accountType, "oauth")
+        XCTAssertTrue(account.supportsResetCreditQuery)
+        let credits = try XCTUnwrap(account.extra?.codexResetCreditSnapshot)
+        XCTAssertEqual(credits.availableCount, 2)
+        XCTAssertEqual(credits.credits.count, 2)
+    }
+
+    func testCachedResetCreditsDropExpiredEntriesAndClampCount() throws {
+        let json = #"{"available_count":2,"credits":[{"expires_at":"2026-08-01T00:00:00Z"},{"expires_at":"2026-10-01T00:00:00Z"}]}"#.data(using: .utf8)!
+        let credits = try JSONDecoder.sub2api.decode(OpenAIResetCredits.self, from: json)
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-07T00:00:00Z"))
+        let normalized = try XCTUnwrap(credits.normalizedForCache(now: now))
+
+        XCTAssertEqual(normalized.availableCount, 1)
+        XCTAssertEqual(normalized.credits.count, 1)
+    }
+
+    func testOpenAIQuotaRefreshDecodesResetCreditContract() throws {
+        let json = #"{"rate_limit_reset_credits":{"available_count":2,"credits":[{"expires_at":"2026-09-21T07:41:00Z"}]},"cache_persisted":true}"#.data(using: .utf8)!
+        let response = try JSONDecoder.sub2api.decode(OpenAIQuotaRefreshResponse.self, from: json)
+
+        XCTAssertEqual(response.rateLimitResetCredits?.availableCount, 2)
+        XCTAssertEqual(response.rateLimitResetCredits?.credits.count, 1)
+        XCTAssertEqual(response.cachePersisted, true)
+    }
+
+    func testBoardRefreshPreservesQueriedResetCredits() throws {
+        let account = Account(
+            id: 7,
+            name: "Codex",
+            platform: "openai",
+            status: "active",
+            schedulable: true,
+            quotaLimit: nil,
+            quotaUsed: nil,
+            quotaDailyLimit: nil,
+            quotaDailyUsed: nil,
+            quotaWeeklyLimit: nil,
+            quotaWeeklyUsed: nil,
+            accountType: "oauth"
+        )
+        let dashboard = DashboardStats(
+            totalUsers: 0,
+            activeUsers: 0,
+            totalAccounts: 1,
+            normalAccounts: 1,
+            errorAccounts: 0,
+            rateLimitAccounts: 0,
+            totalRequests: 0,
+            totalTokens: 0,
+            totalActualCost: 0,
+            todayRequests: 0,
+            todayTokens: 0,
+            todayActualCost: 0,
+            rpm: 0,
+            tpm: 0,
+            averageDurationMS: 0,
+            statsStale: false
+        )
+        let expiry = try XCTUnwrap(ISO8601DateFormatter().date(from: "2099-10-01T00:00:00Z"))
+        let cached = BoardSnapshot(
+            generatedAt: Date(),
+            dashboard: dashboard,
+            trend: [],
+            accounts: [
+                AccountMetric(
+                    account: account,
+                    usage: nil,
+                    today: nil,
+                    error: nil,
+                    resetCredits: OpenAIResetCredits(
+                        availableCount: 1,
+                        credits: [OpenAIResetCredit(expiresAt: expiry)]
+                    )
+                )
+            ]
+        )
+        let refreshed = BoardSnapshot(
+            generatedAt: Date(),
+            dashboard: dashboard,
+            trend: [],
+            accounts: [AccountMetric(account: account, usage: nil, today: nil, error: nil)]
+        )
+
+        let merged = refreshed.preservingResetCredits(from: cached)
+
+        XCTAssertEqual(merged.accounts.first?.resetCredits?.availableCount, 1)
+        XCTAssertEqual(merged.accounts.first?.resetCredits?.earliestExpiration, expiry)
+    }
+
     func testAccountTestResponseDecodesPerformanceContract() throws {
         let json = #"{"success":true,"message":"测试成功","latency":842,"first_token_ms":842,"generation_ms":3600,"output_tokens":128,"tokens_per_second":35.56,"token_count_estimated":false,"details":{"model":"claude-sonnet-4"}}"#.data(using: .utf8)!
         let response = try JSONDecoder.sub2api.decode(AccountTestResponse.self, from: json)

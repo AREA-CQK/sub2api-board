@@ -8,8 +8,7 @@ enum AppConfiguration {
     static var keychainAccessGroup: String? {
         Bundle.main.object(forInfoDictionaryKey: "KeychainAccessGroup") as? String
     }
-    static let legacyWidgetKind = "Sub2APIBoardWidget"
-    static let widgetKind = "Sub2APIBoardWidget.v2"
+    static let widgetKind = "Sub2APIBoardWidget.v3"
 
     static var defaults: UserDefaults {
         UserDefaults(suiteName: appGroup) ?? .standard
@@ -102,9 +101,6 @@ enum SharedStore {
 
     static func loadSettings() -> BoardSettings {
         if let value: BoardSettings = loadFile(named: settingsFile) {
-            if let data = try? JSONEncoder.sub2api.encode(value) {
-                try? KeychainStore.saveSharedData(data, account: settingsKeychainAccount)
-            }
             return value
         }
         if let data = try? KeychainStore.loadSharedData(account: settingsKeychainAccount),
@@ -131,9 +127,6 @@ enum SharedStore {
 
     static func loadSnapshot() -> BoardSnapshot? {
         if let value: BoardSnapshot = loadFile(named: snapshotFile) {
-            if let data = try? JSONEncoder.sub2api.encode(value) {
-                try? KeychainStore.saveSharedData(data, account: snapshotKeychainAccount)
-            }
             return value
         }
         if let data = try? KeychainStore.loadSharedData(account: snapshotKeychainAccount),

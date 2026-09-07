@@ -171,12 +171,96 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
     let quotaDailyUsed: Double?
     let quotaWeeklyLimit: Double?
     let quotaWeeklyUsed: Double?
+    var accountType: String? = nil
+    var extra: AccountExtra? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, name, platform, status, schedulable
+        case accountType = "type", extra
         case quotaLimit = "quota_limit", quotaUsed = "quota_used"
         case quotaDailyLimit = "quota_daily_limit", quotaDailyUsed = "quota_daily_used"
         case quotaWeeklyLimit = "quota_weekly_limit", quotaWeeklyUsed = "quota_weekly_used"
+    }
+
+    var supportsResetCreditQuery: Bool {
+        platform == "openai" && accountType == "oauth"
+    }
+
+    var cachedResetCredits: OpenAIResetCredits? {
+        guard supportsResetCreditQuery else { return nil }
+        return extra?.codexResetCreditSnapshot?.normalizedForCache()
+    }
+}
+
+struct AccountExtra: Codable, Equatable, Sendable {
+    let codexResetCreditSnapshot: OpenAIResetCredits?
+
+    enum CodingKeys: String, CodingKey {
+        case codexResetCreditSnapshot = "codex_reset_credit_snapshot"
+    }
+}
+
+struct OpenAIResetCredit: Codable, Equatable, Sendable {
+    let expiresAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case expiresAt = "expires_at"
+    }
+}
+
+struct OpenAIResetCredits: Codable, Equatable, Sendable {
+    let availableCount: Int
+    let credits: [OpenAIResetCredit]
+
+    enum CodingKeys: String, CodingKey {
+        case availableCount = "available_count", credits
+    }
+
+    init(availableCount: Int, credits: [OpenAIResetCredit] = []) {
+        self.availableCount = max(availableCount, 0)
+        self.credits = credits
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        availableCount = max(try container.decodeIfPresent(Int.self, forKey: .availableCount) ?? 0, 0)
+        credits = try container.decodeIfPresent([OpenAIResetCredit].self, forKey: .credits) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(availableCount, forKey: .availableCount)
+        try container.encode(credits, forKey: .credits)
+    }
+
+    var earliestExpiration: Date? {
+        credits.compactMap(\.expiresAt).min()
+    }
+
+    var hiddenExpirationCount: Int {
+        max(credits.compactMap(\.expiresAt).count - 1, 0)
+    }
+
+    func normalizedForCache(now: Date = Date()) -> OpenAIResetCredits? {
+        let activeCredits = credits.filter { credit in
+            guard let expiresAt = credit.expiresAt else { return false }
+            return expiresAt > now
+        }
+        if availableCount > 0 && activeCredits.isEmpty { return nil }
+        return OpenAIResetCredits(
+            availableCount: min(availableCount, activeCredits.count),
+            credits: activeCredits
+        )
+    }
+}
+
+struct OpenAIQuotaRefreshResponse: Decodable, Equatable, Sendable {
+    let rateLimitResetCredits: OpenAIResetCredits?
+    let cachePersisted: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case rateLimitResetCredits = "rate_limit_reset_credits"
+        case cachePersisted = "cache_persisted"
     }
 }
 
@@ -485,6 +569,7 @@ struct AccountMetric: Codable, Identifiable, Equatable {
     let usage: AccountUsage?
     let today: WindowStats?
     let error: String?
+    var resetCredits: OpenAIResetCredits? = nil
     var id: Int { account.id }
 
     var primaryWindow: (name: String, value: Double, reset: Date?)? {
@@ -515,6 +600,25 @@ struct BoardSnapshot: Codable, Equatable {
     let dashboard: DashboardStats
     let trend: [TrendPoint]
     let accounts: [AccountMetric]
+
+    func preservingResetCredits(from cachedSnapshot: BoardSnapshot?) -> BoardSnapshot {
+        guard let cachedSnapshot else { return self }
+        let cachedCredits = Dictionary(
+            uniqueKeysWithValues: cachedSnapshot.accounts.compactMap { metric in
+                metric.resetCredits?.normalizedForCache().map { (metric.id, $0) }
+            }
+        )
+        var mergedAccounts = accounts
+        for index in mergedAccounts.indices where mergedAccounts[index].resetCredits == nil {
+            mergedAccounts[index].resetCredits = cachedCredits[mergedAccounts[index].id]
+        }
+        return BoardSnapshot(
+            generatedAt: generatedAt,
+            dashboard: dashboard,
+            trend: trend,
+            accounts: mergedAccounts
+        )
+    }
 }
 
 enum CompactFormat {
@@ -549,5 +653,12 @@ enum CompactFormat {
         if hours >= 24 { return "\(hours / 24)d \(hours % 24)h" }
         if hours > 0 { return "\(hours)h \(minutes)m" }
         return "\(minutes)m"
+    }
+
+    static func shortDateTime(_ value: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "MM/dd HH:mm"
+        return formatter.string(from: value)
     }
 }

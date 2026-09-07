@@ -14,6 +14,8 @@ final class BoardViewModel: ObservableObject {
     @Published private(set) var lastRefreshAt: Date?
     @Published private(set) var isPerformanceTesting = false
     @Published private(set) var performanceTestReport: PerformanceTestReport?
+    @Published private(set) var resetCreditQueryingAccountIDs: Set<Int> = []
+    @Published private(set) var resetCreditQueryErrors: [Int: String] = [:]
 
     private let client = Sub2APIClient()
     private var tempToken: String?
@@ -101,9 +103,10 @@ final class BoardViewModel: ObservableObject {
             async let newSnapshot = client.fetchBoard(settings: settings)
             async let newAccounts = client.fetchAccounts(settings: settings)
             let values = try await (newSnapshot, newAccounts)
-            snapshot = values.0
+            let refreshedSnapshot = values.0.preservingResetCredits(from: snapshot)
+            snapshot = refreshedSnapshot
             accounts = values.1
-            try SharedStore.saveSnapshot(values.0)
+            try SharedStore.saveSnapshot(refreshedSnapshot)
             let refreshedAt = Date()
             lastRefreshAt = refreshedAt
             SharedStore.recordWidgetRefreshSuccess(at: refreshedAt)
@@ -162,6 +165,51 @@ final class BoardViewModel: ObservableObject {
         isPerformanceTesting = false
     }
 
+    func queryResetCredits(accountID: Int) async {
+        guard !resetCreditQueryingAccountIDs.contains(accountID) else { return }
+        guard let metric = snapshot?.accounts.first(where: { $0.id == accountID }),
+              metric.account.supportsResetCreditQuery else {
+            resetCreditQueryErrors[accountID] = "仅 OpenAI OAuth 账号支持查询重置次数"
+            return
+        }
+
+        resetCreditQueryingAccountIDs.insert(accountID)
+        resetCreditQueryErrors.removeValue(forKey: accountID)
+        defer { resetCreditQueryingAccountIDs.remove(accountID) }
+
+        do {
+            let response = try await client.fetchOpenAIResetCredits(
+                settings: settings,
+                accountID: accountID
+            )
+            let credits = response.rateLimitResetCredits ?? OpenAIResetCredits(availableCount: 0)
+            guard let currentSnapshot = snapshot,
+                  let index = currentSnapshot.accounts.firstIndex(where: { $0.id == accountID }) else {
+                return
+            }
+
+            var updatedAccounts = currentSnapshot.accounts
+            updatedAccounts[index].resetCredits = credits
+            let updatedSnapshot = BoardSnapshot(
+                generatedAt: currentSnapshot.generatedAt,
+                dashboard: currentSnapshot.dashboard,
+                trend: currentSnapshot.trend,
+                accounts: updatedAccounts
+            )
+            snapshot = updatedSnapshot
+            try SharedStore.saveSnapshot(updatedSnapshot)
+            SharedStore.recordWidgetRefreshSuccess()
+            WidgetCenter.shared.reloadAllTimelines()
+        } catch APIError.unauthorized {
+            isAuthenticated = false
+            resetCreditQueryErrors[accountID] = APIError.unauthorized.localizedDescription
+        } catch APIError.http(status: 404, path: _, message: _) {
+            resetCreditQueryErrors[accountID] = "当前 Sub2API 版本不支持重置次数查询"
+        } catch {
+            resetCreditQueryErrors[accountID] = error.localizedDescription
+        }
+    }
+
     @discardableResult
     func saveSettings() -> Bool {
         guard settings.apiBaseURL != nil else {
@@ -186,6 +234,9 @@ final class BoardViewModel: ObservableObject {
         accounts = []
         performanceTestReport = nil
         isPerformanceTesting = false
+        resetCreditQueryingAccountIDs = []
+        resetCreditQueryErrors = [:]
         WidgetCenter.shared.reloadAllTimelines()
     }
+
 }

@@ -254,8 +254,17 @@ private struct DashboardView: View {
                 Text("尚未选择账号").foregroundStyle(.secondary).padding(.vertical, 18)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 360), spacing: 12)], spacing: 12) {
-                    ForEach(accounts) {
-                        AccountUsageCard(metric: $0, reservedWindowCount: reservedWindowCount)
+                    ForEach(accounts) { metric in
+                        AccountUsageCard(
+                            metric: metric,
+                            reservedWindowCount: reservedWindowCount,
+                            isQueryingResetCredits: model.resetCreditQueryingAccountIDs.contains(metric.id),
+                            resetCreditQueryError: model.resetCreditQueryErrors[metric.id],
+                            onQueryResetCredits: {
+                                let accountID = metric.id
+                                Task { await model.queryResetCredits(accountID: accountID) }
+                            }
+                        )
                     }
                 }
             }
@@ -523,6 +532,9 @@ private enum PerformanceFormat {
 private struct AccountUsageCard: View {
     let metric: AccountMetric
     let reservedWindowCount: Int
+    let isQueryingResetCredits: Bool
+    let resetCreditQueryError: String?
+    let onQueryResetCredits: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -553,6 +565,14 @@ private struct AccountUsageCard: View {
                 }
             }
             .padding(.top, 16)
+
+            AccountResetCreditRow(
+                metric: metric,
+                isQuerying: isQueryingResetCredits,
+                error: resetCreditQueryError,
+                onQuery: onQueryResetCredits
+            )
+            .padding(.top, 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .panelStyle()
@@ -560,6 +580,85 @@ private struct AccountUsageCard: View {
 
     private var isHealthy: Bool { metric.account.status == "active" && metric.account.schedulable }
     private var occupiedWindowCount: Int { max(metric.usageWindows.count, 1) }
+}
+
+private struct AccountResetCreditRow: View {
+    let metric: AccountMetric
+    let isQuerying: Bool
+    let error: String?
+    let onQuery: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 9) {
+            if metric.account.supportsResetCreditQuery {
+                Button(action: onQuery) {
+                    HStack(alignment: .center, spacing: 4) {
+                        if isQuerying {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .frame(width: 12, height: 16, alignment: .center)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 10, weight: .medium))
+                                .frame(width: 12, height: 16, alignment: .center)
+                        }
+                        Text(isQuerying ? "查询中" : "查询")
+                            .frame(height: 16, alignment: .center)
+                    }
+                    .frame(height: 20, alignment: .center)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(BoardTheme.signal)
+                .disabled(isQuerying)
+                .help("查询可用的额度重置次数")
+
+                resetCreditItem(
+                    "次数 \(metric.resetCredits?.availableCount.description ?? "--")",
+                    systemImage: "arrow.counterclockwise.circle",
+                    color: metric.resetCredits == nil ? BoardTheme.secondaryText : BoardTheme.warning
+                )
+
+                if let expiresAt = metric.resetCredits?.earliestExpiration {
+                    resetCreditItem(
+                        "到期 \(CompactFormat.shortDateTime(expiresAt))",
+                        systemImage: "clock",
+                        color: BoardTheme.secondaryText
+                    )
+                    if let hiddenCount = metric.resetCredits?.hiddenExpirationCount, hiddenCount > 0 {
+                        Text("+\(hiddenCount)")
+                            .font(.caption2.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(BoardTheme.secondaryText)
+                            .frame(height: 16, alignment: .center)
+                    }
+                }
+
+                Spacer(minLength: 0)
+                if let error {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(BoardTheme.warning)
+                        .frame(width: 12, height: 16, alignment: .center)
+                        .help(error)
+                }
+            } else {
+                Color.clear
+            }
+        }
+        .font(.caption.monospacedDigit())
+        .frame(height: 20)
+    }
+
+    private func resetCreditItem(_ title: String, systemImage: String, color: Color) -> some View {
+        HStack(alignment: .center, spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .medium))
+                .frame(width: 12, height: 16, alignment: .center)
+            Text(title)
+                .frame(height: 16, alignment: .center)
+        }
+        .foregroundStyle(color)
+        .frame(height: 20, alignment: .center)
+    }
 }
 
 private struct AppUsageWindowRow: View {

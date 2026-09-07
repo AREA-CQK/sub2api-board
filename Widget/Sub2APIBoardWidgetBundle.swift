@@ -5,6 +5,5 @@ import WidgetKit
 struct Sub2APIBoardWidgetBundle: WidgetBundle {
     var body: some Widget {
         Sub2APIBoardWidget()
-        LegacySub2APIBoardWidget()
     }
 }

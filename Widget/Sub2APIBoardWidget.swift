@@ -10,7 +10,9 @@ struct RefreshBoardIntent: AppIntent {
     func perform() async -> some IntentResult {
         let settings = SharedStore.loadSettings()
         do {
-            let snapshot = try await Sub2APIClient().fetchBoard(settings: settings)
+            let snapshot = try await Sub2APIClient()
+                .fetchBoard(settings: settings)
+                .preservingResetCredits(from: SharedStore.loadSnapshot())
             try SharedStore.saveSnapshot(snapshot)
             SharedStore.recordWidgetRefreshSuccess()
         } catch {
@@ -76,7 +78,9 @@ struct BoardTimelineProvider: TimelineProvider {
             }
 
             do {
-                let snapshot = try await Sub2APIClient().fetchBoard(settings: settings)
+                let snapshot = try await Sub2APIClient()
+                    .fetchBoard(settings: settings)
+                    .preservingResetCredits(from: SharedStore.loadSnapshot())
                 try SharedStore.saveSnapshot(snapshot)
                 let refreshedAt = Date()
                 SharedStore.recordWidgetRefreshSuccess(at: refreshedAt)
@@ -104,7 +108,6 @@ struct BoardTimelineProvider: TimelineProvider {
 
 private func reloadBoardTimelines() {
     WidgetCenter.shared.reloadTimelines(ofKind: AppConfiguration.widgetKind)
-    WidgetCenter.shared.reloadTimelines(ofKind: AppConfiguration.legacyWidgetKind)
 }
 
 struct BoardWidgetView: View {
@@ -182,6 +185,9 @@ private struct SmallBoardView: View {
                             .foregroundStyle(BoardTheme.secondaryText)
                         } else {
                             Text("暂无额度数据").font(.caption).foregroundStyle(BoardTheme.secondaryText)
+                        }
+                        if let resetCredits = metric.resetCredits {
+                            WidgetResetCreditLine(credits: resetCredits, compact: true)
                         }
                     }
                 } else {
@@ -393,7 +399,34 @@ private struct DetailedAccountSection: View {
                     UsageWindowRow(name: item.name, window: item.window)
                 }
             }
+            if let resetCredits = metric.resetCredits {
+                WidgetResetCreditLine(credits: resetCredits)
+            }
         }
+    }
+}
+
+private struct WidgetResetCreditLine: View {
+    let credits: OpenAIResetCredits
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "arrow.counterclockwise.circle")
+            Text("次数 \(credits.availableCount)")
+                .foregroundStyle(BoardTheme.warning)
+            if let expiresAt = credits.earliestExpiration {
+                Spacer(minLength: 3)
+                Text("到期 \(CompactFormat.shortDateTime(expiresAt))")
+                if credits.hiddenExpirationCount > 0 {
+                    Text("+\(credits.hiddenExpirationCount)")
+                }
+            }
+        }
+        .font(.system(size: compact ? 8 : 9, weight: .medium, design: .monospaced))
+        .foregroundStyle(BoardTheme.secondaryText)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
     }
 }
 
@@ -547,17 +580,6 @@ struct Sub2APIBoardWidget: Widget {
     }
 }
 
-struct LegacySub2APIBoardWidget: Widget {
-    let kind = AppConfiguration.legacyWidgetKind
-
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: BoardTimelineProvider()) { entry in BoardWidgetView(entry: entry) }
-            .configurationDisplayName("Sub2API 看板")
-            .description("查看账号额度、今日用量和系统总览。")
-            .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
-    }
-}
-
 extension BoardSnapshot {
     static let preview = BoardSnapshot(
         generatedAt: Date(),
@@ -565,7 +587,7 @@ extension BoardSnapshot {
         trend: [],
         accounts: [
             AccountMetric(account: Account(id: 1, name: "Claude Team A", platform: "anthropic", status: "active", schedulable: true, quotaLimit: nil, quotaUsed: nil, quotaDailyLimit: nil, quotaDailyUsed: nil, quotaWeeklyLimit: nil, quotaWeeklyUsed: nil), usage: AccountUsage(updatedAt: Date(), fiveHour: UsageWindow(utilization: 42, resetsAt: nil, remainingSeconds: 4_800, windowStats: WindowStats(requests: 128, tokens: 684_000, cost: 3.42, userCost: 3.42)), sevenDay: UsageWindow(utilization: 67, resetsAt: nil, remainingSeconds: 345_600, windowStats: WindowStats(requests: 842, tokens: 4_260_000, cost: 21.30, userCost: 21.30)), thirtyDay: nil), today: nil, error: nil),
-            AccountMetric(account: Account(id: 2, name: "Codex Pro", platform: "openai", status: "active", schedulable: true, quotaLimit: nil, quotaUsed: nil, quotaDailyLimit: nil, quotaDailyUsed: nil, quotaWeeklyLimit: nil, quotaWeeklyUsed: nil), usage: AccountUsage(updatedAt: Date(), fiveHour: UsageWindow(utilization: 76, resetsAt: nil, remainingSeconds: 2_100, windowStats: WindowStats(requests: 96, tokens: 512_000, cost: 2.56, userCost: 2.56)), sevenDay: UsageWindow(utilization: 31, resetsAt: nil, remainingSeconds: 518_400, windowStats: WindowStats(requests: 614, tokens: 3_180_000, cost: 15.90, userCost: 15.90)), thirtyDay: nil), today: nil, error: nil)
+            AccountMetric(account: Account(id: 2, name: "Codex Pro", platform: "openai", status: "active", schedulable: true, quotaLimit: nil, quotaUsed: nil, quotaDailyLimit: nil, quotaDailyUsed: nil, quotaWeeklyLimit: nil, quotaWeeklyUsed: nil, accountType: "oauth"), usage: AccountUsage(updatedAt: Date(), fiveHour: UsageWindow(utilization: 76, resetsAt: nil, remainingSeconds: 2_100, windowStats: WindowStats(requests: 96, tokens: 512_000, cost: 2.56, userCost: 2.56)), sevenDay: UsageWindow(utilization: 31, resetsAt: nil, remainingSeconds: 518_400, windowStats: WindowStats(requests: 614, tokens: 3_180_000, cost: 15.90, userCost: 15.90)), thirtyDay: nil), today: nil, error: nil, resetCredits: OpenAIResetCredits(availableCount: 2, credits: [OpenAIResetCredit(expiresAt: Date().addingTimeInterval(1_209_600)), OpenAIResetCredit(expiresAt: Date().addingTimeInterval(2_419_200))]))
         ]
     )
 }
