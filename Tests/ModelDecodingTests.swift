@@ -20,9 +20,20 @@ final class ModelDecodingTests: XCTestCase {
     }
 
     func testWidgetRefreshOptionsAndFallback() {
-        XCTAssertEqual(BoardSettings.refreshMinuteOptions, [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60])
-        XCTAssertEqual(BoardSettings(refreshMinutes: 1).effectiveRefreshMinutes, 1)
-        XCTAssertEqual(BoardSettings(refreshMinutes: 3).effectiveRefreshMinutes, 15)
+        XCTAssertEqual(BoardSettings.refreshIntervalSecondOptions, [15, 30, 45, 60, 300, 600, 900, 1200, 1500, 1800, 2100, 2400, 2700, 3000, 3300, 3600])
+        XCTAssertEqual(BoardSettings(refreshIntervalSeconds: 15).effectiveRefreshIntervalSeconds, 15)
+        XCTAssertEqual(BoardSettings(refreshIntervalSeconds: 180).effectiveRefreshIntervalSeconds, 900)
+    }
+
+    func testLegacyRefreshMinutesMigrateToSeconds() throws {
+        let legacy = #"{"serverURL":"https://example.com","selectedAccountIDs":[1,2],"refreshMinutes":5}"#.data(using: .utf8)!
+        let settings = try JSONDecoder.sub2api.decode(BoardSettings.self, from: legacy)
+        XCTAssertEqual(settings.refreshIntervalSeconds, 300)
+
+        let encoded = try JSONEncoder.sub2api.encode(settings)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(object["refreshIntervalSeconds"] as? Int, 300)
+        XCTAssertNil(object["refreshMinutes"])
     }
 
     func testDashboardSnapshotDecodesCurrentBackendContract() throws {
@@ -45,9 +56,152 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(metric.primaryWindow?.value, 32)
     }
 
+    func testAccountTestResponseDecodesPerformanceContract() throws {
+        let json = #"{"success":true,"message":"测试成功","latency":842,"first_token_ms":842,"generation_ms":3600,"output_tokens":128,"tokens_per_second":35.56,"token_count_estimated":false,"details":{"model":"claude-sonnet-4"}}"#.data(using: .utf8)!
+        let response = try JSONDecoder.sub2api.decode(AccountTestResponse.self, from: json)
+
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.message, "测试成功")
+        XCTAssertEqual(response.latencyMS, 842)
+        XCTAssertEqual(response.firstTokenMS, 842)
+        XCTAssertEqual(response.generationMS, 3600)
+        XCTAssertEqual(response.outputTokens, 128)
+        XCTAssertEqual(try XCTUnwrap(response.tokensPerSecond), 35.56, accuracy: 0.001)
+        XCTAssertEqual(response.tokenCountEstimated, false)
+    }
+
+    func testAccountTestResponseDecodesLegacyLatencyMSContract() throws {
+        let json = #"{"success":true,"message":"ok","latency_ms":842.4}"#.data(using: .utf8)!
+        let response = try JSONDecoder.sub2api.decode(AccountTestResponse.self, from: json)
+
+        XCTAssertEqual(response.latencyMS, 842)
+    }
+
+    func testAccountTestParserDecodesEventStreamCompletion() throws {
+        let stream = #"""
+        event: message
+        data: {"type":"test_start","text":"开始测试"}
+
+        data: {"type":"response_received","text":"已收到响应"}
+
+        data: {"type":"test_complete","text":"测试成功！模型: gpt-5","model":"gpt-5","success":true}
+
+        """#.data(using: .utf8)!
+        let response = try AccountTestResponseParser.parse(data: stream, contentType: "text/event-stream; charset=utf-8")
+
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.message, "测试成功！模型: gpt-5")
+        XCTAssertNil(response.latencyMS)
+        XCTAssertNil(response.tokensPerSecond)
+    }
+
+    func testAccountTestParserDecodesEventStreamPerformanceMetrics() throws {
+        let stream = #"""
+        data: {"type":"content","text":"Hello"}
+
+        data: {"type":"test_complete","success":true,"latency_ms":820,"first_token_ms":820,"generation_ms":3600,"output_tokens":128,"tokens_per_second":35.56,"token_count_estimated":true}
+
+        """#.data(using: .utf8)!
+        let response = try AccountTestResponseParser.parse(data: stream, contentType: "text/event-stream")
+
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.latencyMS, 820)
+        XCTAssertEqual(response.firstTokenMS, 820)
+        XCTAssertEqual(response.generationMS, 3600)
+        XCTAssertEqual(response.outputTokens, 128)
+        XCTAssertEqual(try XCTUnwrap(response.tokensPerSecond), 35.56, accuracy: 0.001)
+        XCTAssertEqual(response.tokenCountEstimated, true)
+    }
+
+    func testAccountTestParserDecodesEventStreamError() throws {
+        let stream = #"""
+        data: {"type":"error","error":"上游认证失败"}
+
+        """#.data(using: .utf8)!
+        let response = try AccountTestResponseParser.parse(data: stream, contentType: "text/event-stream")
+
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.message, "上游认证失败")
+    }
+
+    func testAccountTestParserDecodesLegacyEnvelope() throws {
+        let json = #"{"code":0,"message":"success","data":{"success":true,"message":"ok","latency_ms":520}}"#.data(using: .utf8)!
+        let response = try AccountTestResponseParser.parse(data: json, contentType: "application/json")
+
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.latencyMS, 520)
+    }
+
+    func testAccountTestParserReportsMissingEventStreamCompletion() {
+        let stream = #"""
+        data: {"type":"request_sent","text":"请求已发送"}
+
+        """#.data(using: .utf8)!
+
+        XCTAssertThrowsError(try AccountTestResponseParser.parse(data: stream, contentType: "text/event-stream")) { error in
+            XCTAssertEqual(error.localizedDescription, "测速响应未包含完成状态")
+        }
+    }
+
+    func testAccountTestStreamAccumulatorMeasuresLegacyBackendStream() throws {
+        let startedAt = Date(timeIntervalSince1970: 100)
+        var accumulator = AccountTestStreamAccumulator(startedAt: startedAt)
+        accumulator.consume(
+            line: #"data: {"type":"content","text":"abcdefgh"}"#,
+            receivedAt: startedAt.addingTimeInterval(1)
+        )
+        accumulator.consume(
+            line: #"data: {"type":"test_complete","success":true}"#,
+            receivedAt: startedAt.addingTimeInterval(3)
+        )
+
+        let response = try accumulator.finish()
+        XCTAssertEqual(response.firstTokenMS, 1_000)
+        XCTAssertEqual(response.generationMS, 2_000)
+        XCTAssertEqual(response.outputTokens, 2)
+        XCTAssertEqual(try XCTUnwrap(response.tokensPerSecond), 1, accuracy: 0.001)
+        XCTAssertEqual(response.tokenCountEstimated, true)
+    }
+
+    func testAccountTestStreamAccumulatorPrefersServerMetrics() throws {
+        let startedAt = Date(timeIntervalSince1970: 100)
+        var accumulator = AccountTestStreamAccumulator(startedAt: startedAt)
+        accumulator.consume(
+            line: #"data: {"type":"content","text":"abcdefgh"}"#,
+            receivedAt: startedAt.addingTimeInterval(1)
+        )
+        accumulator.consume(
+            line: #"data: {"type":"test_complete","success":true,"first_token_ms":750,"generation_ms":4000,"output_tokens":120,"tokens_per_second":30,"token_count_estimated":false}"#,
+            receivedAt: startedAt.addingTimeInterval(3)
+        )
+
+        let response = try accumulator.finish()
+        XCTAssertEqual(response.firstTokenMS, 750)
+        XCTAssertEqual(response.generationMS, 4_000)
+        XCTAssertEqual(response.outputTokens, 120)
+        XCTAssertEqual(response.tokensPerSecond, 30)
+        XCTAssertEqual(response.tokenCountEstimated, false)
+    }
+
+    func testPerformanceReportCalculatesSuccessfulLatencyOnly() {
+        let successful = AccountPerformanceResult(accountID: 1, accountName: "A", platform: "anthropic", success: true, message: "ok", upstreamLatencyMS: 800, firstTokenMS: 780, generationMS: 2_000, outputTokens: 80, tokensPerSecond: 40, tokenCountEstimated: false, requestDurationMS: 900, testedAt: Date())
+        let failed = AccountPerformanceResult(accountID: 2, accountName: "B", platform: "openai", success: false, message: "failed", upstreamLatencyMS: nil, requestDurationMS: 400, testedAt: Date())
+        let report = PerformanceTestReport(startedAt: Date(), totalDurationMS: 900, results: [successful, failed])
+
+        XCTAssertEqual(report.successCount, 1)
+        XCTAssertEqual(report.averageUpstreamLatencyMS, 800)
+        XCTAssertEqual(report.averageRequestDurationMS, 900)
+        XCTAssertEqual(report.averageFirstTokenMS, 780)
+        XCTAssertEqual(report.averageTokensPerSecond, 40)
+        XCTAssertEqual(report.estimatedTokenRateCount, 0)
+        XCTAssertEqual(report.fastestResult?.accountID, 1)
+        XCTAssertEqual(report.fastestRequestResult?.accountID, 1)
+        XCTAssertEqual(report.fastestGenerationResult?.accountID, 1)
+    }
+
     func testServerURLAppendsAPIVersion() {
-        XCTAssertEqual(BoardSettings(serverURL: "https://example.com/", selectedAccountIDs: [], refreshMinutes: 15).apiBaseURL?.absoluteString, "https://example.com/api/v1")
-        XCTAssertEqual(BoardSettings(serverURL: "https://example.com/api/v1", selectedAccountIDs: [], refreshMinutes: 15).apiBaseURL?.absoluteString, "https://example.com/api/v1")
+        XCTAssertEqual(BoardSettings(serverURL: "https://example.com/", selectedAccountIDs: [], refreshIntervalSeconds: 900).apiBaseURL?.absoluteString, "https://example.com/api/v1")
+        XCTAssertEqual(BoardSettings(serverURL: "https://example.com/api/v1", selectedAccountIDs: [], refreshIntervalSeconds: 900).apiBaseURL?.absoluteString, "https://example.com/api/v1")
     }
 
     func testUsageDateAcceptsFractionalSeconds() throws {

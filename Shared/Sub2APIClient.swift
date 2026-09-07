@@ -55,6 +55,42 @@ actor Sub2APIClient {
         return accounts
     }
 
+    func testAccount(settings: BoardSettings, account: Account) async -> AccountPerformanceResult {
+        let startedAt = Date()
+        do {
+            let response = try await sendAccountTest(
+                settings: settings,
+                accountID: account.id
+            )
+            return AccountPerformanceResult(
+                accountID: account.id,
+                accountName: account.name,
+                platform: account.platform,
+                success: response.success,
+                message: response.message,
+                upstreamLatencyMS: response.latencyMS,
+                firstTokenMS: response.firstTokenMS,
+                generationMS: response.generationMS,
+                outputTokens: response.outputTokens,
+                tokensPerSecond: response.tokensPerSecond,
+                tokenCountEstimated: response.tokenCountEstimated,
+                requestDurationMS: Date().timeIntervalSince(startedAt) * 1_000,
+                testedAt: Date()
+            )
+        } catch {
+            return AccountPerformanceResult(
+                accountID: account.id,
+                accountName: account.name,
+                platform: account.platform,
+                success: false,
+                message: error.localizedDescription,
+                upstreamLatencyMS: nil,
+                requestDurationMS: Date().timeIntervalSince(startedAt) * 1_000,
+                testedAt: Date()
+            )
+        }
+    }
+
     func fetchBoard(settings: BoardSettings) async throws -> BoardSnapshot {
         async let dashboard = fetchDashboard(settings: settings)
         async let allAccounts = fetchAccounts(settings: settings)
@@ -163,11 +199,74 @@ actor Sub2APIClient {
         return access
     }
 
-    private func send<Response: Decodable, Body: Encodable>(settings: BoardSettings, path: String, method: String, body: Body?, authenticated: Bool = true) async throws -> Response {
+    private func sendAccountTest(
+        settings: BoardSettings,
+        accountID: Int
+    ) async throws -> AccountTestResponse {
+        let startedAt = Date()
+        let path = "admin/accounts/\(accountID)/test"
+        guard let baseURL = settings.apiBaseURL,
+              let url = URL(string: path, relativeTo: baseURL.appendingPathComponent(""))?.absoluteURL else {
+            throw APIError.invalidServerURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream, application/json", forHTTPHeaderField: "Accept")
+        request.setValue(Locale.preferredLanguages.first ?? "zh-CN", forHTTPHeaderField: "Accept-Language")
+        request.setValue("1", forHTTPHeaderField: "X-Admin-UI-Request")
+        request.setValue("Bearer \(try await validAccessToken(settings: settings))", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder.sub2api.encode(
+            AccountPerformanceTestRequest(
+                prompt: "Respond with about 100 short English words in plain text. Do not use headings, lists, code, or explanations.",
+                mode: "text"
+            )
+        )
+
+        let (bytes, rawResponse) = try await session.bytes(for: request)
+        guard let http = rawResponse as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if http.statusCode == 401 { throw APIError.unauthorized }
+        guard (200..<300).contains(http.statusCode) else {
+            var data = Data()
+            for try await byte in bytes {
+                data.append(byte)
+            }
+            let envelope = try? JSONDecoder.sub2api.decode(APIErrorEnvelope.self, from: data)
+            throw APIError.http(status: http.statusCode, path: path, message: envelope?.message)
+        }
+
+        if http.value(forHTTPHeaderField: "Content-Type")?.localizedCaseInsensitiveContains("text/event-stream") == true {
+            var accumulator = AccountTestStreamAccumulator(startedAt: startedAt)
+            for try await line in bytes.lines {
+                accumulator.consume(line: line, receivedAt: Date())
+            }
+            return try accumulator.finish()
+        }
+
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+        }
+        return try AccountTestResponseParser.parse(
+            data: data,
+            contentType: http.value(forHTTPHeaderField: "Content-Type")
+        )
+    }
+
+    private func send<Response: Decodable, Body: Encodable>(
+        settings: BoardSettings,
+        path: String,
+        method: String,
+        body: Body?,
+        authenticated: Bool = true,
+        timeoutInterval: TimeInterval = 25
+    ) async throws -> Response {
         guard let baseURL = settings.apiBaseURL, let url = URL(string: path, relativeTo: baseURL.appendingPathComponent(""))?.absoluteURL else { throw APIError.invalidServerURL }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = 25
+        request.timeoutInterval = timeoutInterval
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(Locale.preferredLanguages.first ?? "zh-CN", forHTTPHeaderField: "Accept-Language")
         request.setValue("1", forHTTPHeaderField: "X-Admin-UI-Request")
@@ -184,6 +283,188 @@ actor Sub2APIClient {
         let envelope = try JSONDecoder.sub2api.decode(APIEnvelope<Response>.self, from: data)
         guard envelope.code == 0, let value = envelope.data else { throw APIError.server(envelope.message ?? "请求失败") }
         return value
+    }
+}
+
+enum AccountTestResponseParser {
+    static func parse(data: Data, contentType: String?) throws -> AccountTestResponse {
+        let responseText = String(data: data, encoding: .utf8)
+        let isEventStream = contentType?.localizedCaseInsensitiveContains("text/event-stream") == true
+            || responseText?.split(whereSeparator: \.isNewline).contains(where: {
+                $0.trimmingCharacters(in: .whitespaces).hasPrefix("data:")
+            }) == true
+
+        if isEventStream {
+            return try parseEventStream(data)
+        }
+
+        let decoder = JSONDecoder.sub2api
+        if let envelope = try? decoder.decode(APIEnvelope<AccountTestResponse>.self, from: data) {
+            guard envelope.code == 0 else {
+                throw APIError.server(envelope.message ?? "测速失败")
+            }
+            guard let response = envelope.data else {
+                throw APIError.server("测速响应缺少结果数据")
+            }
+            return response
+        }
+        if let response = try? decoder.decode(AccountTestResponse.self, from: data) {
+            return response
+        }
+        throw APIError.server("测速响应格式不受支持，请确认 Sub2API 服务版本")
+    }
+
+    private static func parseEventStream(_ data: Data) throws -> AccountTestResponse {
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw APIError.server("测速响应不是有效的 UTF-8 数据")
+        }
+
+        let decoder = JSONDecoder.sub2api
+        var terminalResponse: AccountTestResponse?
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+            guard !payload.isEmpty, payload != "[DONE]", let eventData = payload.data(using: .utf8) else {
+                continue
+            }
+            guard let event = try? decoder.decode(AccountTestStreamEvent.self, from: eventData) else {
+                continue
+            }
+
+            switch event.type {
+            case "test_complete":
+                terminalResponse = AccountTestResponse(
+                    success: event.success ?? true,
+                    message: event.text ?? (event.success == false ? "测试失败" : "测试成功"),
+                    latencyMS: event.latencyMS,
+                    firstTokenMS: event.firstTokenMS,
+                    generationMS: event.generationMS,
+                    outputTokens: event.outputTokens,
+                    tokensPerSecond: event.tokensPerSecond,
+                    tokenCountEstimated: event.tokenCountEstimated
+                )
+            case "error":
+                terminalResponse = AccountTestResponse(
+                    success: false,
+                    message: event.error ?? event.text ?? "测试失败",
+                    latencyMS: nil
+                )
+            default:
+                continue
+            }
+        }
+
+        guard let terminalResponse else {
+            throw APIError.server("测速响应未包含完成状态")
+        }
+        return terminalResponse
+    }
+}
+
+struct AccountTestStreamAccumulator {
+    private let startedAt: Date
+    private var firstContentAt: Date?
+    private var outputText = ""
+    private var terminalResponse: AccountTestResponse?
+
+    init(startedAt: Date) {
+        self.startedAt = startedAt
+    }
+
+    mutating func consume(line rawLine: String, receivedAt: Date) {
+        let line = rawLine.trimmingCharacters(in: .whitespaces)
+        guard line.hasPrefix("data:") else { return }
+        let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+        guard !payload.isEmpty,
+              payload != "[DONE]",
+              let eventData = payload.data(using: .utf8),
+              let event = try? JSONDecoder.sub2api.decode(AccountTestStreamEvent.self, from: eventData) else {
+            return
+        }
+
+        switch event.type {
+        case "content":
+            guard let text = event.text, !text.isEmpty else { return }
+            if firstContentAt == nil {
+                firstContentAt = receivedAt
+            }
+            outputText.append(text)
+        case "test_complete":
+            terminalResponse = completionResponse(from: event, receivedAt: receivedAt)
+        case "error":
+            terminalResponse = AccountTestResponse(
+                success: false,
+                message: event.error ?? event.text ?? "测试失败",
+                latencyMS: nil
+            )
+        default:
+            return
+        }
+    }
+
+    func finish() throws -> AccountTestResponse {
+        guard let terminalResponse else {
+            throw APIError.server("测速响应未包含完成状态")
+        }
+        return terminalResponse
+    }
+
+    private func completionResponse(
+        from event: AccountTestStreamEvent,
+        receivedAt: Date
+    ) -> AccountTestResponse {
+        let clientFirstTokenMS = firstContentAt.map {
+            max(0, Int($0.timeIntervalSince(startedAt) * 1_000))
+        }
+        let clientGenerationMS = firstContentAt.map {
+            max(1, Int(receivedAt.timeIntervalSince($0) * 1_000))
+        }
+        let estimatedOutputTokens = AccountTestTokenEstimator.estimate(outputText)
+        let outputTokens = event.outputTokens ?? estimatedOutputTokens
+        let generationMS = event.generationMS ?? clientGenerationMS
+        let tokensPerSecond = event.tokensPerSecond ?? {
+            guard let outputTokens, let generationMS else { return nil }
+            return Double(outputTokens) * 1_000 / Double(generationMS)
+        }()
+        let tokenCountEstimated = event.tokenCountEstimated
+            ?? (event.outputTokens == nil && estimatedOutputTokens != nil ? true : nil)
+
+        return AccountTestResponse(
+            success: event.success ?? true,
+            message: event.text ?? (event.success == false ? "测试失败" : "测试成功"),
+            latencyMS: event.latencyMS,
+            firstTokenMS: event.firstTokenMS ?? clientFirstTokenMS,
+            generationMS: generationMS,
+            outputTokens: outputTokens,
+            tokensPerSecond: tokensPerSecond,
+            tokenCountEstimated: tokenCountEstimated
+        )
+    }
+}
+
+enum AccountTestTokenEstimator {
+    static func estimate(_ text: String) -> Int? {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+        var cjkScalars = 0
+        var otherScalars = 0
+        for scalar in text.unicodeScalars {
+            if isCJK(scalar.value) {
+                cjkScalars += 1
+            } else {
+                otherScalars += 1
+            }
+        }
+        return max(1, cjkScalars + (otherScalars + 3) / 4)
+    }
+
+    private static func isCJK(_ value: UInt32) -> Bool {
+        (0x3400...0x4DBF).contains(value)
+            || (0x4E00...0x9FFF).contains(value)
+            || (0x3040...0x30FF).contains(value)
+            || (0xAC00...0xD7AF).contains(value)
+            || (0x20000...0x2FA1F).contains(value)
     }
 }
 

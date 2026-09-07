@@ -33,7 +33,7 @@ struct ContentView: View {
 
     private var refreshSchedule: RefreshSchedule {
         RefreshSchedule(
-            minutes: model.settings.effectiveRefreshMinutes,
+            seconds: model.settings.effectiveRefreshIntervalSeconds,
             isActive: scenePhase == .active,
             isAuthenticated: model.isAuthenticated
         )
@@ -43,10 +43,9 @@ struct ContentView: View {
         guard schedule.isActive, schedule.isAuthenticated else { return }
         await model.refresh()
 
-        let nanoseconds = UInt64(schedule.minutes) * 60 * 1_000_000_000
         while !Task.isCancelled {
             do {
-                try await Task.sleep(nanoseconds: nanoseconds)
+                try await Task.sleep(for: .seconds(schedule.seconds))
             } catch {
                 return
             }
@@ -57,7 +56,7 @@ struct ContentView: View {
 }
 
 private struct RefreshSchedule: Equatable {
-    let minutes: Int
+    let seconds: Int
     let isActive: Bool
     let isAuthenticated: Bool
 }
@@ -66,6 +65,7 @@ private struct DashboardView: View {
     @EnvironmentObject private var model: BoardViewModel
     @State private var chartMetric: TrendMetric = .requests
     @State private var hoveredDate: String?
+    @State private var showsPerformanceTest = false
 
     var body: some View {
         ScrollView {
@@ -88,6 +88,10 @@ private struct DashboardView: View {
             }
         }
         .background(BoardTheme.canvas)
+        .sheet(isPresented: $showsPerformanceTest) {
+            PerformanceTestView()
+                .environmentObject(model)
+        }
     }
 
     private func header(_ snapshot: BoardSnapshot) -> some View {
@@ -109,30 +113,52 @@ private struct DashboardView: View {
                     .font(.caption).foregroundStyle(.orange)
             }
             Divider().overlay(BoardTheme.border).frame(height: 22)
-            Button {
-                Task { await model.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(BoardTheme.accent)
-            .disabled(model.isLoading)
-            .help("立即刷新")
+            HStack(spacing: 18) {
+                Button {
+                    Task { await model.refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(BoardTheme.accent)
+                .disabled(model.isLoading)
+                .help("立即刷新")
 
-            SettingsLink {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(.borderless)
-            .help("设置")
+                Button {
+                    showsPerformanceTest = true
+                    Task { await model.runPerformanceTest() }
+                } label: {
+                    ZStack {
+                        Image(systemName: "speedometer")
+                            .opacity(model.isPerformanceTesting ? 0 : 1)
+                        if model.isPerformanceTesting {
+                            ProgressView().controlSize(.mini)
+                        }
+                    }
+                    .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(BoardTheme.signal)
+                .help("测试当前看板账号性能")
 
-            Button {
-                model.logout()
-            } label: {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
+                SettingsLink {
+                    Image(systemName: "gearshape")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.borderless)
+                .help("设置")
+
+                Button {
+                    model.logout()
+                } label: {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("退出登录")
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .help("退出登录")
         }
     }
 
@@ -284,6 +310,213 @@ private struct MetricTile: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .panelStyle()
+    }
+}
+
+private struct PerformanceTestView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var model: BoardViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("AI 配置测速")
+                        .font(.title2.bold())
+                    Text("并行测试当前看板账号到上游 AI 服务的连接性能")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(BoardTheme.secondaryText)
+                }
+                Spacer()
+                Button("完成") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+
+            if model.isPerformanceTesting {
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .controlSize(.large)
+                    Text("正在测试账号连接，请稍候…")
+                        .font(.callout.monospaced())
+                    Text("测试会向每个账号的上游服务发起一次轻量请求")
+                        .font(.caption)
+                        .foregroundStyle(BoardTheme.secondaryText)
+                }
+                .frame(maxWidth: .infinity, minHeight: 280)
+                .panelStyle()
+            } else if let report = model.performanceTestReport {
+                reportContent(report)
+            } else {
+                ContentUnavailableView(
+                    "暂无测速结果",
+                    systemImage: "speedometer",
+                    description: Text("点击重新测速以检查当前账号配置")
+                )
+                .frame(maxWidth: .infinity, minHeight: 280)
+            }
+
+            HStack {
+                if let report = model.performanceTestReport, !model.isPerformanceTesting {
+                    Text("TESTED \(report.startedAt.formatted(date: .omitted, time: .standard))")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(BoardTheme.secondaryText)
+                }
+                Spacer()
+                Button {
+                    Task { await model.runPerformanceTest() }
+                } label: {
+                    Label("重新测速", systemImage: "speedometer")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(BoardTheme.accent)
+                .disabled(model.isPerformanceTesting)
+            }
+        }
+        .padding(20)
+        .frame(width: 720, height: 560)
+        .background(BoardTheme.canvas)
+        .preferredColorScheme(.dark)
+        .tint(BoardTheme.accent)
+    }
+
+    @ViewBuilder
+    private func reportContent(_ report: PerformanceTestReport) -> some View {
+        let hasFirstToken = report.averageFirstTokenMS != nil
+        let hasUpstreamLatency = report.averageUpstreamLatencyMS != nil
+        let averageLatency = report.averageFirstTokenMS
+            ?? report.averageUpstreamLatencyMS
+            ?? report.averageRequestDurationMS
+        let fastestAccount = hasUpstreamLatency ? report.fastestResult : report.fastestRequestResult
+        let averageTokensPerSecond = report.averageTokensPerSecond
+
+        HStack(spacing: 10) {
+            PerformanceMetricTile(
+                title: "成功账号",
+                value: "\(report.successCount)/\(report.results.count)",
+                detail: report.successCount == report.results.count ? "全部可用" : "存在连接异常",
+                color: report.successCount == report.results.count ? BoardTheme.healthy : BoardTheme.warning
+            )
+            PerformanceMetricTile(
+                title: hasFirstToken ? "平均首 Token" : (hasUpstreamLatency ? "平均上游延迟" : "平均端到端"),
+                value: averageLatency.map { CompactFormat.duration(milliseconds: $0) } ?? "--",
+                detail: fastestAccount.map { "最快 · \($0.accountName)" } ?? "暂无成功结果",
+                color: BoardTheme.signal
+            )
+            PerformanceMetricTile(
+                title: averageTokensPerSecond == nil ? "并行总耗时" : "平均生成速度",
+                value: averageTokensPerSecond.map {
+                    "\(report.estimatedTokenRateCount > 0 ? "≈" : "")\(PerformanceFormat.tokenRate($0)) tok/s"
+                } ?? CompactFormat.duration(milliseconds: report.totalDurationMS),
+                detail: averageTokensPerSecond == nil
+                    ? "旧版后端暂不返回 Token/s"
+                    : (report.estimatedTokenRateCount > 0
+                        ? "\(report.estimatedTokenRateCount) 个账号使用估算 Token"
+                        : (report.fastestGenerationResult.map { "最快 · \($0.accountName)" } ?? "上游返回精确 Token")),
+                color: BoardTheme.accent
+            )
+        }
+
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                ForEach(report.results) { result in
+                    PerformanceResultRow(result: result)
+                }
+            }
+        }
+    }
+}
+
+private struct PerformanceMetricTile: View {
+    let title: String
+    let value: String
+    let detail: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold).monospaced())
+                .foregroundStyle(BoardTheme.secondaryText)
+            Text(value)
+                .font(.title3.bold().monospacedDigit())
+                .foregroundStyle(color)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(BoardTheme.secondaryText)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panelStyle()
+    }
+}
+
+private struct PerformanceResultRow: View {
+    let result: AccountPerformanceResult
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundStyle(result.success ? BoardTheme.healthy : BoardTheme.critical)
+                .font(.title3)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(result.accountName)
+                        .font(.headline.monospaced())
+                        .lineLimit(1)
+                    Text(result.platform.uppercased())
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(BoardTheme.secondaryText)
+                }
+                Text(result.message)
+                    .font(.caption)
+                    .foregroundStyle(result.success ? BoardTheme.secondaryText : BoardTheme.critical)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 12)
+
+            performanceValue(
+                title: result.firstTokenMS == nil ? "上游延迟" : "首 Token",
+                value: (result.firstTokenMS ?? result.upstreamLatencyMS)
+                    .map { CompactFormat.duration(milliseconds: Double($0)) } ?? "--"
+            )
+            performanceValue(
+                title: "Token/s",
+                value: result.tokensPerSecond.map {
+                    "\(result.tokenCountEstimated == true ? "≈" : "")\(PerformanceFormat.tokenRate($0))"
+                } ?? "--"
+            )
+            performanceValue(
+                title: "输出 Token",
+                value: result.outputTokens.map {
+                    "\(result.tokenCountEstimated == true ? "≈" : "")\($0)"
+                } ?? "--"
+            )
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(BoardTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(BoardTheme.border, lineWidth: 1))
+    }
+
+    private func performanceValue(title: String, value: String) -> some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.bold).monospaced())
+                .foregroundStyle(BoardTheme.secondaryText)
+            Text(value)
+                .font(.callout.weight(.semibold).monospacedDigit())
+                .foregroundStyle(BoardTheme.primaryText)
+        }
+        .frame(width: 82, alignment: .trailing)
+    }
+
+}
+
+private enum PerformanceFormat {
+    static func tokenRate(_ value: Double) -> String {
+        String(format: value >= 100 ? "%.0f" : "%.1f", value)
     }
 }
 

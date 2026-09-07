@@ -2,14 +2,16 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var model: BoardViewModel
+    @State private var isSavingAndRefreshing = false
+    @State private var saveResultMessage: String?
 
     var body: some View {
         Form {
             Section("连接") {
                 TextField("服务地址", text: $model.settings.serverURL)
-                Picker("App 与 Widget 刷新间隔", selection: $model.settings.refreshMinutes) {
-                    ForEach(BoardSettings.refreshMinuteOptions, id: \.self) { minutes in
-                        Text("\(minutes) 分钟").tag(minutes)
+                Picker("App 与 Widget 刷新间隔", selection: $model.settings.refreshIntervalSeconds) {
+                    ForEach(BoardSettings.refreshIntervalSecondOptions, id: \.self) { seconds in
+                        Text(refreshIntervalTitle(seconds)).tag(seconds)
                     }
                 }
             }
@@ -35,12 +37,32 @@ struct SettingsView: View {
                     .font(.caption.monospaced()).foregroundStyle(BoardTheme.secondaryText)
             }
             HStack {
+                if let saveResultMessage {
+                    Text(saveResultMessage)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(BoardTheme.secondaryText)
+                }
                 Spacer()
-                Button("保存并刷新") {
-                    guard model.saveSettings() else { return }
-                    Task { await model.refresh() }
+                Button {
+                    Task {
+                        isSavingAndRefreshing = true
+                        saveResultMessage = nil
+                        let succeeded = await model.saveSettingsAndRefresh()
+                        saveResultMessage = succeeded
+                            ? "已保存并刷新 · \(Date().formatted(date: .omitted, time: .standard))"
+                            : "保存或刷新失败"
+                        isSavingAndRefreshing = false
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        if isSavingAndRefreshing {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text(isSavingAndRefreshing ? "正在保存并刷新" : "保存并刷新")
+                    }
                 }
                 .buttonStyle(.borderedProminent).tint(BoardTheme.accent)
+                .disabled(isSavingAndRefreshing)
             }
         }
         .formStyle(.grouped)
@@ -62,5 +84,9 @@ struct SettingsView: View {
             }
             _ = model.saveSettings()
         }
+    }
+
+    private func refreshIntervalTitle(_ seconds: Int) -> String {
+        seconds < 60 ? "\(seconds) 秒" : "\(seconds / 60) 分钟"
     }
 }

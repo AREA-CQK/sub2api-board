@@ -159,7 +159,7 @@ struct PaginatedAccounts: Decodable {
     let total: Int
 }
 
-struct Account: Codable, Identifiable, Equatable {
+struct Account: Codable, Identifiable, Equatable, Sendable {
     let id: Int
     let name: String
     let platform: String
@@ -177,6 +177,207 @@ struct Account: Codable, Identifiable, Equatable {
         case quotaLimit = "quota_limit", quotaUsed = "quota_used"
         case quotaDailyLimit = "quota_daily_limit", quotaDailyUsed = "quota_daily_used"
         case quotaWeeklyLimit = "quota_weekly_limit", quotaWeeklyUsed = "quota_weekly_used"
+    }
+}
+
+struct AccountTestResponse: Decodable, Equatable, Sendable {
+    let success: Bool
+    let message: String
+    let latencyMS: Int?
+    let firstTokenMS: Int?
+    let generationMS: Int?
+    let outputTokens: Int?
+    let tokensPerSecond: Double?
+    let tokenCountEstimated: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case success, message
+        case latency
+        case latencyMS = "latency_ms"
+        case firstTokenMS = "first_token_ms"
+        case generationMS = "generation_ms"
+        case outputTokens = "output_tokens"
+        case tokensPerSecond = "tokens_per_second"
+        case tokenCountEstimated = "token_count_estimated"
+    }
+
+    init(
+        success: Bool,
+        message: String,
+        latencyMS: Int?,
+        firstTokenMS: Int? = nil,
+        generationMS: Int? = nil,
+        outputTokens: Int? = nil,
+        tokensPerSecond: Double? = nil,
+        tokenCountEstimated: Bool? = nil
+    ) {
+        self.success = success
+        self.message = message
+        self.latencyMS = latencyMS
+        self.firstTokenMS = firstTokenMS
+        self.generationMS = generationMS
+        self.outputTokens = outputTokens
+        self.tokensPerSecond = tokensPerSecond
+        self.tokenCountEstimated = tokenCountEstimated
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        success = try container.decode(Bool.self, forKey: .success)
+        message = try container.decode(String.self, forKey: .message)
+        latencyMS = try Self.decodeLatency(from: container, forKey: .latency)
+            ?? Self.decodeLatency(from: container, forKey: .latencyMS)
+        firstTokenMS = try Self.decodeLatency(from: container, forKey: .firstTokenMS)
+        generationMS = try Self.decodeLatency(from: container, forKey: .generationMS)
+        outputTokens = try container.decodeIfPresent(Int.self, forKey: .outputTokens)
+        tokensPerSecond = try container.decodeIfPresent(Double.self, forKey: .tokensPerSecond)
+        tokenCountEstimated = try container.decodeIfPresent(Bool.self, forKey: .tokenCountEstimated)
+    }
+
+    private static func decodeLatency(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) throws -> Int? {
+        if let value = try? container.decode(Int.self, forKey: key) {
+            return value
+        }
+        if let value = try? container.decode(Double.self, forKey: key) {
+            return Int(value.rounded())
+        }
+        return nil
+    }
+}
+
+struct AccountTestStreamEvent: Decodable, Equatable, Sendable {
+    let type: String
+    let text: String?
+    let model: String?
+    let success: Bool?
+    let error: String?
+    let latencyMS: Int?
+    let firstTokenMS: Int?
+    let generationMS: Int?
+    let outputTokens: Int?
+    let tokensPerSecond: Double?
+    let tokenCountEstimated: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case type, text, model, success, error
+        case latencyMS = "latency_ms"
+        case firstTokenMS = "first_token_ms"
+        case generationMS = "generation_ms"
+        case outputTokens = "output_tokens"
+        case tokensPerSecond = "tokens_per_second"
+        case tokenCountEstimated = "token_count_estimated"
+    }
+}
+
+struct AccountPerformanceTestRequest: Encodable {
+    let prompt: String
+    let mode: String
+}
+
+struct AccountPerformanceResult: Identifiable, Equatable, Sendable {
+    let accountID: Int
+    let accountName: String
+    let platform: String
+    let success: Bool
+    let message: String
+    let upstreamLatencyMS: Int?
+    let firstTokenMS: Int?
+    let generationMS: Int?
+    let outputTokens: Int?
+    let tokensPerSecond: Double?
+    let tokenCountEstimated: Bool?
+    let requestDurationMS: Double
+    let testedAt: Date
+
+    var id: Int { accountID }
+
+    init(
+        accountID: Int,
+        accountName: String,
+        platform: String,
+        success: Bool,
+        message: String,
+        upstreamLatencyMS: Int?,
+        firstTokenMS: Int? = nil,
+        generationMS: Int? = nil,
+        outputTokens: Int? = nil,
+        tokensPerSecond: Double? = nil,
+        tokenCountEstimated: Bool? = nil,
+        requestDurationMS: Double,
+        testedAt: Date
+    ) {
+        self.accountID = accountID
+        self.accountName = accountName
+        self.platform = platform
+        self.success = success
+        self.message = message
+        self.upstreamLatencyMS = upstreamLatencyMS
+        self.firstTokenMS = firstTokenMS
+        self.generationMS = generationMS
+        self.outputTokens = outputTokens
+        self.tokensPerSecond = tokensPerSecond
+        self.tokenCountEstimated = tokenCountEstimated
+        self.requestDurationMS = requestDurationMS
+        self.testedAt = testedAt
+    }
+}
+
+struct PerformanceTestReport: Equatable, Sendable {
+    let startedAt: Date
+    let totalDurationMS: Double
+    let results: [AccountPerformanceResult]
+
+    var successCount: Int { results.count(where: \.success) }
+
+    var averageUpstreamLatencyMS: Double? {
+        let values = results.filter(\.success).compactMap(\.upstreamLatencyMS)
+        guard !values.isEmpty else { return nil }
+        return Double(values.reduce(0, +)) / Double(values.count)
+    }
+
+    var averageRequestDurationMS: Double? {
+        let values = results.filter(\.success).map(\.requestDurationMS)
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    var averageFirstTokenMS: Double? {
+        let values = results.filter(\.success).compactMap(\.firstTokenMS)
+        guard !values.isEmpty else { return nil }
+        return Double(values.reduce(0, +)) / Double(values.count)
+    }
+
+    var averageTokensPerSecond: Double? {
+        let values = results.filter(\.success).compactMap(\.tokensPerSecond)
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    var estimatedTokenRateCount: Int {
+        results.count { $0.success && $0.tokensPerSecond != nil && $0.tokenCountEstimated == true }
+    }
+
+    var fastestResult: AccountPerformanceResult? {
+        results
+            .filter(\.success)
+            .compactMap { result in result.upstreamLatencyMS.map { (result, $0) } }
+            .min { $0.1 < $1.1 }?
+            .0
+    }
+
+    var fastestRequestResult: AccountPerformanceResult? {
+        results.filter(\.success).min { $0.requestDurationMS < $1.requestDurationMS }
+    }
+
+    var fastestGenerationResult: AccountPerformanceResult? {
+        results
+            .filter(\.success)
+            .compactMap { result in result.tokensPerSecond.map { (result, $0) } }
+            .max { $0.1 < $1.1 }?
+            .0
     }
 }
 

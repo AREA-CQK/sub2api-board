@@ -16,15 +16,48 @@ enum AppConfiguration {
     }
 }
 
-struct BoardSettings: Codable, Equatable {
-    static let refreshMinuteOptions = [1, 5, 10] + Array(stride(from: 15, through: 60, by: 5))
+struct BoardSettings: Codable, Equatable, Sendable {
+    static let refreshIntervalSecondOptions = [15, 30, 45, 60, 300, 600] + Array(stride(from: 900, through: 3600, by: 300))
 
     var serverURL = ""
     var selectedAccountIDs: [Int] = []
-    var refreshMinutes = 15
+    var refreshIntervalSeconds = 900
 
-    var effectiveRefreshMinutes: Int {
-        Self.refreshMinuteOptions.contains(refreshMinutes) ? refreshMinutes : 15
+    var effectiveRefreshIntervalSeconds: Int {
+        Self.refreshIntervalSecondOptions.contains(refreshIntervalSeconds) ? refreshIntervalSeconds : 900
+    }
+
+    init(serverURL: String = "", selectedAccountIDs: [Int] = [], refreshIntervalSeconds: Int = 900) {
+        self.serverURL = serverURL
+        self.selectedAccountIDs = selectedAccountIDs
+        self.refreshIntervalSeconds = refreshIntervalSeconds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case serverURL
+        case selectedAccountIDs
+        case refreshIntervalSeconds
+        case refreshMinutes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        serverURL = try container.decodeIfPresent(String.self, forKey: .serverURL) ?? ""
+        selectedAccountIDs = try container.decodeIfPresent([Int].self, forKey: .selectedAccountIDs) ?? []
+        if let seconds = try container.decodeIfPresent(Int.self, forKey: .refreshIntervalSeconds) {
+            refreshIntervalSeconds = seconds
+        } else if let legacyMinutes = try container.decodeIfPresent(Int.self, forKey: .refreshMinutes) {
+            refreshIntervalSeconds = legacyMinutes * 60
+        } else {
+            refreshIntervalSeconds = 900
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(serverURL, forKey: .serverURL)
+        try container.encode(selectedAccountIDs, forKey: .selectedAccountIDs)
+        try container.encode(refreshIntervalSeconds, forKey: .refreshIntervalSeconds)
     }
 
     var apiBaseURL: URL? {
@@ -50,12 +83,20 @@ struct BoardSettings: Codable, Equatable {
     private static let localHosts: Set<String> = ["localhost", "127.0.0.1", "::1"]
 }
 
+struct WidgetRefreshState: Codable, Equatable {
+    var revision = 0
+    var lastAttemptAt: Date?
+    var lastSuccessAt: Date?
+    var errorMessage: String?
+}
+
 enum SharedStore {
     private static let logger = Logger(subsystem: "com.changqk.Sub2APIBoard", category: "SharedStore")
     private static let settingsKey = "board.settings.v1"
     private static let snapshotKey = "board.snapshot.v1"
     private static let settingsFile = "board-settings-v1.json"
     private static let snapshotFile = "board-snapshot-v1.json"
+    private static let widgetRefreshStateFile = "widget-refresh-state-v1.json"
     private static let settingsKeychainAccount = "settings.v1"
     private static let snapshotKeychainAccount = "snapshot.v1"
 
@@ -117,9 +158,33 @@ enum SharedStore {
         try? KeychainStore.saveSharedData(data, account: snapshotKeychainAccount)
     }
 
+    static func loadWidgetRefreshState() -> WidgetRefreshState {
+        loadFile(named: widgetRefreshStateFile) ?? WidgetRefreshState()
+    }
+
+    static func recordWidgetRefreshSuccess(at date: Date = Date()) {
+        var state = loadWidgetRefreshState()
+        state.revision &+= 1
+        state.lastAttemptAt = date
+        state.lastSuccessAt = date
+        state.errorMessage = nil
+        try? saveWidgetRefreshState(state)
+    }
+
+    static func recordWidgetRefreshFailure(_ error: Error, at date: Date = Date()) {
+        var state = loadWidgetRefreshState()
+        state.revision &+= 1
+        state.lastAttemptAt = date
+        state.errorMessage = error.localizedDescription
+        try? saveWidgetRefreshState(state)
+    }
+
     static func clearSnapshot() {
         KeychainStore.clearSharedData(account: snapshotKeychainAccount)
         if let url = sharedFileURL(named: snapshotFile) {
+            try? FileManager.default.removeItem(at: url)
+        }
+        if let url = sharedFileURL(named: widgetRefreshStateFile) {
             try? FileManager.default.removeItem(at: url)
         }
         AppConfiguration.defaults.removeObject(forKey: snapshotKey)
@@ -149,6 +214,10 @@ enum SharedStore {
     private static func writeFile(_ data: Data, named name: String) throws {
         guard let url = sharedFileURL(named: name) else { return }
         try data.write(to: url, options: .atomic)
+    }
+
+    private static func saveWidgetRefreshState(_ state: WidgetRefreshState) throws {
+        try writeFile(try JSONEncoder.sub2api.encode(state), named: widgetRefreshStateFile)
     }
 
     private static func sharedFileURL(named name: String) -> URL? {

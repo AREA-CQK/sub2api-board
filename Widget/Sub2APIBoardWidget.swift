@@ -7,11 +7,19 @@ struct RefreshBoardIntent: AppIntent {
     static let description = IntentDescription("立即读取账号额度和看板数据。")
     static let openAppWhenRun = false
 
-    func perform() async throws -> some IntentResult {
+    func perform() async -> some IntentResult {
         let settings = SharedStore.loadSettings()
-        let snapshot = try await Sub2APIClient().fetchBoard(settings: settings)
-        try SharedStore.saveSnapshot(snapshot)
-        WidgetCenter.shared.reloadAllTimelines()
+        do {
+            let snapshot = try await Sub2APIClient().fetchBoard(settings: settings)
+            try SharedStore.saveSnapshot(snapshot)
+            SharedStore.recordWidgetRefreshSuccess()
+        } catch {
+            // WidgetKit does not surface thrown intent errors in the widget UI. Persist the
+            // failure so the refreshed timeline can show an error state instead of appearing
+            // as if the button did nothing.
+            SharedStore.recordWidgetRefreshFailure(error)
+        }
+        reloadBoardTimelines()
         return .result()
     }
 }
@@ -20,6 +28,22 @@ struct BoardEntry: TimelineEntry {
     let date: Date
     let snapshot: BoardSnapshot?
     let error: String?
+    let refreshedAt: Date
+    let refreshRevision: Int
+
+    init(
+        date: Date,
+        snapshot: BoardSnapshot?,
+        error: String?,
+        refreshedAt: Date? = nil,
+        refreshRevision: Int = 0
+    ) {
+        self.date = date
+        self.snapshot = snapshot
+        self.error = error
+        self.refreshedAt = refreshedAt ?? snapshot?.generatedAt ?? date
+        self.refreshRevision = refreshRevision
+    }
 }
 
 struct BoardTimelineProvider: TimelineProvider {
@@ -28,24 +52,59 @@ struct BoardTimelineProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (BoardEntry) -> Void) {
-        completion(BoardEntry(date: Date(), snapshot: SharedStore.loadSnapshot() ?? .preview, error: nil))
+        let state = SharedStore.loadWidgetRefreshState()
+        completion(makeEntry(snapshot: SharedStore.loadSnapshot() ?? .preview, state: state))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<BoardEntry>) -> Void) {
         Task {
             let settings = SharedStore.loadSettings()
+            let state = SharedStore.loadWidgetRefreshState()
+            let interval = TimeInterval(settings.effectiveRefreshIntervalSeconds)
+
+            // An interactive refresh already completed the request before WidgetKit asks for
+            // a new timeline. Reuse that fresh shared snapshot to avoid an immediate duplicate
+            // network request that could fail and make the button appear ineffective.
+            if let attemptedAt = state.lastAttemptAt,
+               Date().timeIntervalSince(attemptedAt) < 10,
+               let cached = SharedStore.loadSnapshot() {
+                completion(Timeline(
+                    entries: [makeEntry(snapshot: cached, state: state)],
+                    policy: .after(Date().addingTimeInterval(interval))
+                ))
+                return
+            }
+
             do {
                 let snapshot = try await Sub2APIClient().fetchBoard(settings: settings)
                 try SharedStore.saveSnapshot(snapshot)
-                let interval = TimeInterval(settings.effectiveRefreshMinutes * 60)
-                completion(Timeline(entries: [BoardEntry(date: Date(), snapshot: snapshot, error: nil)], policy: .after(Date().addingTimeInterval(interval))))
+                let refreshedAt = Date()
+                SharedStore.recordWidgetRefreshSuccess(at: refreshedAt)
+                let refreshedState = SharedStore.loadWidgetRefreshState()
+                completion(Timeline(entries: [makeEntry(snapshot: snapshot, state: refreshedState)], policy: .after(Date().addingTimeInterval(interval))))
             } catch {
                 let cached = SharedStore.loadSnapshot()
-                let interval = TimeInterval(settings.effectiveRefreshMinutes * 60)
-                completion(Timeline(entries: [BoardEntry(date: Date(), snapshot: cached, error: error.localizedDescription)], policy: .after(Date().addingTimeInterval(interval))))
+                SharedStore.recordWidgetRefreshFailure(error)
+                let failedState = SharedStore.loadWidgetRefreshState()
+                completion(Timeline(entries: [makeEntry(snapshot: cached, state: failedState)], policy: .after(Date().addingTimeInterval(interval))))
             }
         }
     }
+
+    private func makeEntry(snapshot: BoardSnapshot?, state: WidgetRefreshState) -> BoardEntry {
+        BoardEntry(
+            date: Date(),
+            snapshot: snapshot,
+            error: state.errorMessage,
+            refreshedAt: state.lastSuccessAt,
+            refreshRevision: state.revision
+        )
+    }
+}
+
+private func reloadBoardTimelines() {
+    WidgetCenter.shared.reloadTimelines(ofKind: AppConfiguration.widgetKind)
+    WidgetCenter.shared.reloadTimelines(ofKind: AppConfiguration.legacyWidgetKind)
 }
 
 struct BoardWidgetView: View {
@@ -64,9 +123,9 @@ struct BoardWidgetView: View {
         Group {
             if let snapshot = entry.snapshot {
                 switch family {
-                case .systemSmall: SmallBoardView(snapshot: snapshot, hasError: entry.error != nil)
-                case .systemLarge: LargeBoardView(snapshot: snapshot, hasError: entry.error != nil)
-                default: MediumBoardView(snapshot: snapshot, hasError: entry.error != nil)
+                case .systemSmall: SmallBoardView(snapshot: snapshot, entry: entry)
+                case .systemLarge: LargeBoardView(snapshot: snapshot, entry: entry)
+                default: MediumBoardView(snapshot: snapshot, entry: entry)
                 }
             } else {
                 VStack(spacing: 8) {
@@ -84,11 +143,11 @@ struct BoardWidgetView: View {
 
 private struct SmallBoardView: View {
     let snapshot: BoardSnapshot
-    let hasError: Bool
+    let entry: BoardEntry
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            WidgetHeader(snapshot: snapshot, hasError: hasError, showsTimestamp: false)
+            WidgetHeader(entry: entry, compact: true)
             TimelineView(.periodic(from: .now, by: 3)) { context in
                 if let metric = rotatingAccounts(snapshot.accounts, visibleCount: 1, at: context.date).first {
                     VStack(alignment: .leading, spacing: 6) {
@@ -148,11 +207,11 @@ private struct SmallBoardView: View {
 
 private struct MediumBoardView: View {
     let snapshot: BoardSnapshot
-    let hasError: Bool
+    let entry: BoardEntry
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            WidgetHeader(snapshot: snapshot, hasError: hasError)
+            WidgetHeader(entry: entry)
             HStack(spacing: 10) {
                 Label(CompactFormat.number(snapshot.dashboard.todayRequests), systemImage: "arrow.up.arrow.down")
                 Label(CompactFormat.number(snapshot.dashboard.todayTokens), systemImage: "cube")
@@ -186,11 +245,11 @@ private struct MediumBoardView: View {
 
 private struct LargeBoardView: View {
     let snapshot: BoardSnapshot
-    let hasError: Bool
+    let entry: BoardEntry
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WidgetHeader(snapshot: snapshot, hasError: hasError)
+            WidgetHeader(entry: entry)
             HStack(spacing: 8) {
                 WidgetMetric(title: "今日请求", value: CompactFormat.number(snapshot.dashboard.todayRequests))
                 WidgetMetric(title: "今日 Token", value: CompactFormat.number(snapshot.dashboard.todayTokens))
@@ -219,38 +278,50 @@ private struct LargeBoardView: View {
 }
 
 private struct WidgetHeader: View {
-    let snapshot: BoardSnapshot
-    let hasError: Bool
-    var showsTimestamp = true
+    let entry: BoardEntry
+    var compact = false
 
     var body: some View {
         HStack {
             HStack(spacing: 5) {
                 Image("BrandMark").resizable().scaledToFit().frame(width: 16, height: 16)
-                Text("Sub2API")
+                if !compact {
+                    Text("Sub2API")
+                }
             }
             .font(.caption.weight(.semibold).monospaced())
             .foregroundStyle(BoardTheme.accent)
             Spacer()
-            if showsTimestamp {
-                Text(snapshot.generatedAt.formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(BoardTheme.secondaryText)
-            }
+            Text(widgetRefreshTime(entry.refreshedAt))
+                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                .foregroundStyle(BoardTheme.secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
             HStack(spacing: 7) {
-                Image(systemName: hasError ? "exclamationmark.icloud" : "checkmark.icloud")
+                Image(systemName: entry.error == nil ? "checkmark.icloud" : "exclamationmark.icloud")
                     .font(.caption2)
-                    .foregroundStyle(hasError ? BoardTheme.warning : BoardTheme.secondaryText)
+                    .foregroundStyle(entry.error == nil ? BoardTheme.secondaryText : BoardTheme.warning)
                 Button(intent: RefreshBoardIntent()) {
                     Image(systemName: "arrow.clockwise")
                         .font(.caption2.weight(.semibold))
+                        .rotationEffect(.degrees(Double(entry.refreshRevision % 4) * 90))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(BoardTheme.accent)
                 .accessibilityLabel("刷新数据")
+                .help(entry.error ?? "立即刷新数据")
             }
         }
     }
+}
+
+private func widgetRefreshTime(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "HH:mm:ss"
+    return formatter.string(from: date)
 }
 
 private struct WidgetMetric: View {
